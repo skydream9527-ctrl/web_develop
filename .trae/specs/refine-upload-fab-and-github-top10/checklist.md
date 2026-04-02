@@ -1,0 +1,5 @@
+- [x] 右上角已显示小型悬浮上传按钮（FAB），点击可打开上传弹层
+- [x] agents 页面顶部已展示 GitHub 热门 agent TOP10，点击可跳转仓库地址
+- [x] skills 页面顶部已展示 GitHub 热门 skill 相关 TOP10，点击可跳转仓库地址
+- [x] 所有新增外链均使用 target=_blank 且 rel=noopener noreferrer
+- [x] 页面布局未出现明显遮挡或主内容错位
