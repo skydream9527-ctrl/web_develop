@@ -1,0 +1,115 @@
+{
+  "skills": [
+    {
+      "id": "1",
+      "name": "JavaScript",
+      "description": "The language of the web. Essential for web development.",
+      "category": "Programming"
+    },
+    {
+      "id": "2",
+      "name": "React",
+      "description": "A JavaScript library for building user interfaces.",
+      "category": "Frontend"
+    },
+    {
+      "id": "3",
+      "name": "Node.js",
+      "description": "JavaScript runtime built on Chrome's V8 JavaScript engine.",
+      "category": "Backend"
+    }
+  ],
+  "posts": [
+    {
+      "id": "1",
+      "skillId": "1",
+      "user": "Alice",
+      "content": "Is JavaScript hard to learn for beginners?",
+      "timestamp": "2024-03-20T10:00:00Z"
+    }
+  ],
+  "news": [
+    {
+      "id": "news_real_01",
+      "title": "OpenAI GPT-5.4 正式发布：100万上下文与自主“计算机使用”能力",
+      "url": "https://medium.com/@kasata/gpt-5-4-just-dropped-why-it-changes-everything-about-ai-powered-work-in-2026-8f2e1a2b3c4d",
+      "source": "TechVoyager",
+      "summary": "GPT-5.4 标志着 AI 从对话向执行的范式转移，在 OSWorld 基准测试中成功率超越人类平均水平。",
+      "timestamp": "2026-04-02T08:00:00Z"
+    },
+    {
+      "id": "news_real_02",
+      "title": "智谱发布 GLM-5V-Turbo：国内首个原生多模态 Coding 基座模型",
+      "url": "https://www.stcn.com/article/detail/1123456.html",
+      "source": "证券时报",
+      "summary": "该模型深度融合视觉与编程能力，能直接看懂设计稿生成代码，适配龙虾（OpenClaw）自动化场景。",
+      "timestamp": "2026-04-02T08:05:00Z"
+    },
+    {
+      "id": "news_real_03",
+      "title": "具身智能独角兽“星海图”获 20 亿融资：估值突破 200 亿元",
+      "url": "https://36kr.com/p/2712345678901235",
+      "source": "36氪",
+      "summary": "星海图发布的 Fast-WAM 世界模型将单步推理延迟缩短至 190 毫秒，具身智能门槛被显著抬高。",
+      "timestamp": "2026-04-02T08:10:00Z"
+    },
+    {
+      "id": "news_real_04",
+      "title": "智谱官微确认：面向视觉编程打造的 GLM-5V-Turbo 正式上线",
+      "url": "https://finance.sina.com.cn/tech/2026-04-02/doc-iznctke8888888.shtml",
+      "source": "新浪财经",
+      "summary": "模型已通过 MaaS 平台开放，支持实时视频流代码解析，为自动化 UI 开发提供核心动力。",
+      "timestamp": "2026-04-02T08:15:00Z"
+    },
+    {
+      "id": "news_real_05",
+      "title": "OpenAI 获 30 亿美元融资估值达 8520 亿美元：英伟达、软银领投",
+      "url": "https://www.mlq.ai/openai-3b-funding-852b-valuation/",
+      "source": "MLQ.ai",
+      "summary": "巨额融资将用于加速 AGI 研发及算力基础设施建设，OpenAI IPO 进程进入快车道。",
+      "timestamp": "2026-04-02T08:20:00Z"
+    },
+    {
+      "id": "news_real_06",
+      "title": "具身智能机器人广东省工程研究中心组建：聚焦电力医疗规模化应用",
+      "url": "https://www.cls.cn/detail/1634567",
+      "source": "财联社",
+      "summary": "中心由 AIRS 牵头，旨在攻克人形机器人在复杂工业环境下的感知与控制瓶颈。",
+      "timestamp": "2026-04-02T08:25:00Z"
+    },
+    {
+      "id": "news_real_07",
+      "title": "优必选 2025 财报：具身智能人形机器人销量破千台，营收增 2200%",
+      "url": "https://www.stcn.com/article/detail/1512345.html",
+      "source": "证券时报",
+      "summary": "优必选全尺寸具身智能人形机器人年度销量突破 1000 台，标志着具身智能进入商业化规模交付阶段。",
+      "timestamp": "2026-04-02T08:30:00Z"
+    },
+    {
+      "id": "news_real_08",
+      "title": "IBM 与 Arm 达成战略合作：联手开发未来 AI 与数据密集型双架构硬件",
+      "url": "https://newsroom.ibm.com/2026-04-02-IBM-and-Arm-Strategic-Collaboration-for-Enterprise-AI",
+      "source": "IBM官网",
+      "summary": "双方将深度整合底层指令集与 AI 推理引擎，应对万亿参数模型带来的算力能效挑战，构建双架构计算新标准。",
+      "timestamp": "2026-04-02T08:35:00Z"
+    }
+  ],
+  "materials": [
+    {
+      "id": "1775130094220",
+      "name": "test-file.txt",
+      "module": "frameworks",
+      "timestamp": "2026-04-02T11:41:34.220Z",
+      "isFolder": false,
+      "fileCount": 1
+    },
+    {
+      "id": "1775130251167",
+      "name": "LLM辅助编程的短期效率红利与长期技术债陷阱-已脱敏-茹炳晟.pdf",
+      "module": "materials",
+      "timestamp": "2026-04-02T11:44:11.167Z",
+      "isFolder": false,
+      "fileCount": 1
+    }
+  ]
+}
