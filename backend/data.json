@@ -111,5 +111,145 @@
       "isFolder": false,
       "fileCount": 1
     }
-  ]
+  ],
+  "submenuConfig": {
+    "news": [
+      {
+        "label": "新闻总览",
+        "to": "/news"
+      },
+      {
+        "label": "热点列表",
+        "to": "/news#news-list"
+      },
+      {
+        "label": "AI 深度摘要",
+        "to": "/news#ai-analysis"
+      }
+    ],
+    "frameworks": [
+      {
+        "label": "AI 实践框架总览",
+        "to": "/frameworks"
+      },
+      {
+        "label": "已同步资料",
+        "to": "/frameworks#synced-materials"
+      },
+      {
+        "label": "推荐实践案例",
+        "to": "/frameworks#practice-cases"
+      }
+    ],
+    "agents": [
+      {
+        "label": "AI Agent 总览",
+        "to": "/agents"
+      },
+      {
+        "label": "GitHub TOP10",
+        "to": "/agents#github-top10"
+      },
+      {
+        "label": "已同步资料",
+        "to": "/agents#synced-materials"
+      },
+      {
+        "label": "推荐实践案例",
+        "to": "/agents#practice-cases"
+      }
+    ],
+    "skills": [
+      {
+        "label": "AI Skill 总览",
+        "to": "/skills"
+      },
+      {
+        "label": "GitHub TOP10",
+        "to": "/skills#github-top10"
+      },
+      {
+        "label": "已同步资料",
+        "to": "/skills#synced-materials"
+      },
+      {
+        "label": "推荐实践案例",
+        "to": "/skills#practice-cases"
+      }
+    ],
+    "knowledge": [
+      {
+        "label": "AI 知识库总览",
+        "to": "/knowledge"
+      },
+      {
+        "label": "已同步资料",
+        "to": "/knowledge#synced-materials"
+      },
+      {
+        "label": "推荐实践案例",
+        "to": "/knowledge#practice-cases"
+      }
+    ],
+    "materials": [
+      {
+        "label": "学习资料总览",
+        "to": "/materials"
+      },
+      {
+        "label": "已同步资料",
+        "to": "/materials#synced-materials"
+      },
+      {
+        "label": "推荐实践案例",
+        "to": "/materials#practice-cases"
+      }
+    ],
+    "tools": [
+      {
+        "label": "好用工具总览",
+        "to": "/tools"
+      },
+      {
+        "label": "已同步资料",
+        "to": "/tools#synced-materials"
+      },
+      {
+        "label": "推荐实践案例",
+        "to": "/tools#practice-cases"
+      }
+    ],
+    "apps": [
+      {
+        "label": "APP 开发总览",
+        "to": "/apps"
+      },
+      {
+        "label": "已同步资料",
+        "to": "/apps#synced-materials"
+      },
+      {
+        "label": "推荐实践案例",
+        "to": "/apps#practice-cases"
+      }
+    ],
+    "webs": [
+      {
+        "label": "网页开发总览",
+        "to": "/webs"
+      },
+      {
+        "label": "已同步资料",
+        "to": "/webs#synced-materials"
+      },
+      {
+        "label": "推荐实践案例",
+        "to": "/webs#practice-cases"
+      }
+    ]
+  },
+  "admin": {
+    "passwordHash": "ac0e7d037817094e9e0b4441f9bae3209d67b02fa484917065f71b16109a1a78",
+    "updatedAt": "2026-04-03T03:58:58.646Z"
+  }
 }

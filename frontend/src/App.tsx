@@ -1,4 +1,4 @@
-import { useState, useEffect, type MouseEvent, type ReactNode } from 'react';
+import { useState, useEffect, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useParams } from 'react-router-dom';
 import { 
   Box, Bot, Cpu, Database, Layout, Globe, Sun, 
@@ -26,6 +26,11 @@ type Material = {
   isFolder: boolean;
   fileCount: number;
   content?: string;
+};
+
+type SubMenuItem = {
+  label: string;
+  to: string;
 };
 
 // --- Aligned Data ---
@@ -74,29 +79,62 @@ const openExternalLink = (url: string) => {
   if (nextWindow) nextWindow.opener = null;
 };
 
-const Sidebar = () => {
+const Sidebar = ({ submenuConfig }: { submenuConfig: Record<string, SubMenuItem[]> }) => {
   const location = useLocation();
+  const isHomePage = location.pathname === '/';
+  const firstSegment = location.pathname.split('/').filter(Boolean)[0];
+  const currentSubPageId = location.pathname.startsWith('/materials/') ? 'materials' : firstSegment;
+  const currentCategory = CATEGORIES.find((cat) => cat.id === currentSubPageId);
+  const subMenus: Record<string, SubMenuItem[]> = submenuConfig || {};
+  const defaultSubMenu = currentCategory
+    ? [
+        { label: `${currentCategory.label}总览`, to: currentCategory.path },
+        { label: '已同步资料', to: `${currentCategory.path}#synced-materials` },
+        { label: '推荐实践案例', to: `${currentCategory.path}#practice-cases` }
+      ]
+    : [{ label: '返回主页面', to: '/' }];
+  const activeSubMenu = subMenus[currentSubPageId] || defaultSubMenu;
+  const currentPathWithHash = `${location.pathname}${location.hash || ''}`;
+
   return (
     <aside className="sidebar">
       <div className="logo-area">
         <Zap size={28} color="var(--primary-solid)" fill="var(--primary-solid)" />
         <span>AI 数据实践宝库</span>
       </div>
-      <nav style={{ flex: 1 }}>
-        <Link to="/" className={`nav-item ${location.pathname === '/' ? 'active' : ''}`}>
-          <Home size={20} />
-          <span style={{ marginLeft: '12px' }}>全景地图</span>
-        </Link>
-        <div style={{ marginTop: '32px', padding: '0 16px', fontSize: '0.75rem', fontWeight: 700, color: '#AAA', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>
-          资源分类
-        </div>
-        {CATEGORIES.map(cat => (
-          <Link key={cat.id} to={cat.path} className={`nav-item ${location.pathname.includes(cat.id) ? 'active' : ''}`}>
-            {cat.icon}
-            <span style={{ marginLeft: '12px' }}>{cat.label}</span>
+      {isHomePage ? (
+        <nav style={{ flex: 1 }}>
+          <Link to="/" className={`nav-item ${location.pathname === '/' ? 'active' : ''}`}>
+            <Home size={20} />
+            <span style={{ marginLeft: '12px' }}>全景地图</span>
           </Link>
-        ))}
-      </nav>
+          <div style={{ marginTop: '32px', padding: '0 16px', fontSize: '0.75rem', fontWeight: 700, color: '#AAA', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>
+            资源分类
+          </div>
+          {CATEGORIES.map(cat => (
+            <Link key={cat.id} to={cat.path} className={`nav-item ${location.pathname.includes(cat.id) ? 'active' : ''}`}>
+              {cat.icon}
+              <span style={{ marginLeft: '12px' }}>{cat.label}</span>
+            </Link>
+          ))}
+        </nav>
+      ) : (
+        <nav style={{ flex: 1 }}>
+          <Link to="/" className="nav-item">
+            <ChevronLeft size={18} />
+            <span style={{ marginLeft: '12px' }}>返回到首页</span>
+          </Link>
+          <div style={{ marginTop: '20px', padding: '0 16px', fontSize: '0.75rem', fontWeight: 700, color: '#AAA', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>
+            {currentCategory?.label || '子页面'} 子菜单
+          </div>
+          {activeSubMenu.map((item) => (
+            <Link key={item.to} to={item.to} className={`nav-item ${currentPathWithHash === item.to || location.pathname.startsWith(item.to.split('#')[0]) ? 'active' : ''}`}>
+              <ArrowRight size={16} />
+              <span style={{ marginLeft: '12px' }}>{item.label}</span>
+            </Link>
+          ))}
+        </nav>
+      )}
       <div style={{ padding: '16px', background: 'rgba(0,0,0,0.03)', borderRadius: '12px', fontSize: '0.8rem' }}>
         <div style={{ fontWeight: 700, marginBottom: '4px' }}>新功能上线</div>
         <div style={{ color: 'var(--text-sec)' }}>已支持 PDF/Markdown 在线阅读</div>
@@ -105,7 +143,7 @@ const Sidebar = () => {
   );
 };
 
-const Header = () => (
+const Header = ({ role, onToggleRole }: { role: 'visitor' | 'editor' | 'admin'; onToggleRole: () => void }) => (
   <header className="header-actions">
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-sec)', fontSize: '0.9rem' }}>
       <Home size={16} /> / <span>首页</span>
@@ -119,12 +157,295 @@ const Header = () => (
           style={{ padding: '10px 16px 10px 40px', borderRadius: '30px', border: '1px solid var(--border)', width: '240px', outline: 'none' }} 
         />
       </div>
+      <button
+        onClick={onToggleRole}
+        style={{
+          border: '1px solid var(--border)',
+          background: 'var(--bg-sidebar)',
+          color: 'var(--text-main)',
+          borderRadius: '999px',
+          padding: '0 14px',
+          height: '40px',
+          cursor: 'pointer'
+        }}
+      >
+        当前角色：{role}
+      </button>
+      <Link
+        to="/admin"
+        style={{
+          border: '1px solid var(--border)',
+          background: 'var(--bg-sidebar)',
+          color: 'var(--text-main)',
+          borderRadius: '999px',
+          padding: '0 14px',
+          height: '40px',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          textDecoration: 'none'
+        }}
+      >
+        后台配置
+      </Link>
       <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--bg-sidebar)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
         <Sun size={20} />
       </div>
     </div>
   </header>
 );
+
+const AdminConfigPage = ({
+  submenuConfig,
+  onSaved,
+  onRoleChange
+}: {
+  submenuConfig: Record<string, SubMenuItem[]>;
+  onSaved: () => Promise<void>;
+  onRoleChange: (role: 'visitor' | 'editor' | 'admin') => void;
+}) => {
+  const [adminToken, setAdminToken] = useState<string>(localStorage.getItem('admin_token') || '');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [selectedPage, setSelectedPage] = useState('news');
+  const [editingItems, setEditingItems] = useState<SubMenuItem[]>([]);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const availablePages = Array.from(new Set(['news', ...CATEGORIES.map((c) => c.id), ...Object.keys(submenuConfig || {})]));
+
+  useEffect(() => {
+    if (!availablePages.includes(selectedPage)) {
+      setSelectedPage(availablePages[0] || 'news');
+    }
+  }, [selectedPage, availablePages]);
+
+  useEffect(() => {
+    const source = submenuConfig[selectedPage] || [];
+    setEditingItems(source.map((item) => ({ ...item })));
+  }, [selectedPage, submenuConfig]);
+
+  const buildAuthHeaders = () => ({
+    headers: {
+      Authorization: `Bearer ${adminToken}`
+    }
+  });
+
+  const handleLogin = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!loginPassword.trim()) return;
+    setBusy(true);
+    setStatusMessage('');
+    try {
+      const payload: { username?: string; password: string } = { password: loginPassword.trim() };
+      if (loginUsername.trim()) payload.username = loginUsername.trim();
+      const res = await axios.post('/api/admin/login', payload);
+      const token = res.data?.token || '';
+      if (!token) throw new Error('登录失败');
+      localStorage.setItem('admin_token', token);
+      setAdminToken(token);
+      const roles: string[] = res.data?.roles || [];
+      if (roles.includes('admin')) {
+        localStorage.setItem('role', 'admin');
+        onRoleChange('admin');
+      } else if (roles.includes('editor')) {
+        localStorage.setItem('role', 'editor');
+        onRoleChange('editor');
+      }
+      setLoginPassword('');
+      setLoginUsername('');
+      setStatusMessage('登录成功，可以开始配置子菜单。');
+    } catch (error: unknown) {
+      const errorMessage = axios.isAxiosError(error) ? error.response?.data?.error : '';
+      setStatusMessage(errorMessage || '登录失败，请检查密码。');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setBusy(true);
+    try {
+      await axios.post('/api/admin/logout', {}, buildAuthHeaders());
+    } catch {
+      setStatusMessage('已退出登录。');
+    } finally {
+      localStorage.removeItem('admin_token');
+      setAdminToken('');
+      setOldPassword('');
+      setNewPassword('');
+      setStatusMessage('已退出登录。');
+      localStorage.setItem('role', 'visitor');
+      onRoleChange('visitor');
+      setBusy(false);
+    }
+  };
+
+  const handleSaveSubmenu = async () => {
+    const payloadItems = editingItems
+      .map((item) => ({ label: item.label.trim(), to: item.to.trim() }))
+      .filter((item) => item.label && item.to);
+    if (!payloadItems.length) {
+      setStatusMessage('至少保留一个有效菜单项。');
+      return;
+    }
+    setBusy(true);
+    setStatusMessage('');
+    try {
+      await axios.put(`/api/admin/submenus/${selectedPage}`, { items: payloadItems }, buildAuthHeaders());
+      await onSaved();
+      setStatusMessage('保存成功。');
+    } catch (error: unknown) {
+      const errorMessage = axios.isAxiosError(error) ? error.response?.data?.error : '';
+      setStatusMessage(errorMessage || '保存失败，请稍后重试。');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleChangePassword = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!oldPassword.trim() || !newPassword.trim()) return;
+    setBusy(true);
+    setStatusMessage('');
+    try {
+      await axios.put('/api/admin/password', { oldPassword: oldPassword.trim(), newPassword: newPassword.trim() }, buildAuthHeaders());
+      localStorage.removeItem('admin_token');
+      setAdminToken('');
+      setOldPassword('');
+      setNewPassword('');
+      setStatusMessage('密码已更新，请使用新密码重新登录。');
+    } catch (error: unknown) {
+      const errorMessage = axios.isAxiosError(error) ? error.response?.data?.error : '';
+      setStatusMessage(errorMessage || '修改密码失败。');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateEditingItem = (index: number, key: 'label' | 'to', value: string) => {
+    setEditingItems((prev) => prev.map((item, i) => (i === index ? { ...item, [key]: value } : item)));
+  };
+
+  return (
+    <div className="fade-in" style={{ maxWidth: '980px' }}>
+      <div style={{ marginBottom: '16px' }}>
+        <Link to="/" className="btn-primary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <ChevronLeft size={16} /> 返回到首页
+        </Link>
+      </div>
+      <div style={{ background: 'var(--bg-sidebar)', border: '1px solid var(--border)', borderRadius: '16px', padding: '20px' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <h2 style={{ margin: 0, fontSize: '1.2rem' }}>后台子菜单配置</h2>
+        </div>
+
+        {!adminToken ? (
+          <form onSubmit={handleLogin} style={{ display: 'grid', gap: '12px' }}>
+            <input
+              type="text"
+              value={loginUsername}
+              onChange={(e) => setLoginUsername(e.target.value)}
+              placeholder="管理员用户名（可选）"
+              style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
+            />
+            <input
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              placeholder="请输入管理员密码"
+              style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
+            />
+            <button type="submit" className="btn-primary" disabled={busy} style={{ width: 'fit-content' }}>
+              {busy ? '登录中...' : '登录配置后台'}
+            </button>
+            <div style={{ color: 'var(--text-sec)', fontSize: '0.85rem' }}>默认密码来自后端环境变量 ADMIN_PASSWORD，建议首次登录后立即修改。</div>
+          </form>
+        ) : (
+          <div style={{ display: 'grid', gap: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+              <select
+                value={selectedPage}
+                onChange={(e) => setSelectedPage(e.target.value)}
+                style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
+              >
+                {availablePages.map((pageId) => (
+                  <option key={pageId} value={pageId}>{pageId}</option>
+                ))}
+              </select>
+              <button onClick={handleLogout} className="btn-pagination" style={{ width: 'auto', borderRadius: '8px', padding: '0 12px' }}>
+                退出登录
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: '10px' }}>
+              {editingItems.map((item, index) => (
+                <div key={`${selectedPage}-${index}`} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px' }}>
+                  <input
+                    value={item.label}
+                    onChange={(e) => updateEditingItem(index, 'label', e.target.value)}
+                    placeholder="菜单名称"
+                    style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
+                  />
+                  <input
+                    value={item.to}
+                    onChange={(e) => updateEditingItem(index, 'to', e.target.value)}
+                    placeholder="跳转地址，例如 /agents#github-top10"
+                    style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
+                  />
+                  <button
+                    onClick={() => setEditingItems((prev) => prev.filter((_, i) => i !== index))}
+                    className="btn-pagination"
+                    style={{ width: 'auto', borderRadius: '8px', padding: '0 10px' }}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button
+                onClick={() => setEditingItems((prev) => [...prev, { label: '', to: '' }])}
+                className="btn-pagination"
+                style={{ width: 'auto', borderRadius: '8px', padding: '0 12px' }}
+              >
+                新增菜单项
+              </button>
+              <button onClick={handleSaveSubmenu} className="btn-primary" disabled={busy}>
+                {busy ? '保存中...' : '保存当前页面子菜单'}
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePassword} style={{ display: 'grid', gap: '8px', marginTop: '8px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+              <div style={{ fontWeight: 700 }}>修改管理员密码</div>
+              <input
+                type="password"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                placeholder="旧密码"
+                style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
+              />
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="新密码（至少 6 位）"
+                style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
+              />
+              <button type="submit" className="btn-primary" disabled={busy} style={{ width: 'fit-content' }}>
+                更新密码
+              </button>
+            </form>
+          </div>
+        )}
+
+        {statusMessage && <div style={{ marginTop: '14px', color: 'var(--text-sec)', fontSize: '0.85rem' }}>{statusMessage}</div>}
+      </div>
+    </div>
+  );
+};
 
 const GITHUB_TOP10: Record<'agents' | 'skills', Array<{ name: string; url: string }>> = {
   agents: [
@@ -287,7 +608,7 @@ const HomePage = () => (
       </p>
     </section>
 
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '32px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '32px', marginBottom: '40px' }}>
       {CATEGORIES.map(cat => (
         <Link key={cat.id} to={cat.path} className="standard-card">
           <div className="card-icon">{cat.icon}</div>
@@ -299,6 +620,37 @@ const HomePage = () => (
         </Link>
       ))}
     </div>
+
+    <section>
+      <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '16px' }}>子页面预览</h2>
+      <p style={{ color: 'var(--text-sec)', marginBottom: '20px' }}>每个模块均提供主页预览，点击即可进入对应子页面。</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+        {CATEGORIES.map((cat) => (
+          <Link
+            key={`preview-${cat.id}`}
+            to={cat.path}
+            style={{
+              background: 'rgba(255,255,255,0.02)',
+              border: '1px solid var(--border)',
+              borderRadius: '12px',
+              padding: '16px',
+              textDecoration: 'none',
+              color: 'inherit',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ color: 'var(--primary-solid)', display: 'flex', alignItems: 'center' }}>{cat.icon}</span>
+              <strong>{cat.label}</strong>
+            </div>
+            <span style={{ fontSize: '0.88rem', color: 'var(--text-sec)', lineHeight: 1.5 }}>{cat.desc}</span>
+            <span style={{ fontSize: '0.78rem', color: 'var(--primary-solid)' }}>点击进入独立页面 →</span>
+          </Link>
+        ))}
+      </div>
+    </section>
   </div>
 );
 
@@ -339,7 +691,12 @@ const NewsPage = () => {
 
   return (
     <div className="fade-in">
-      <section style={{ marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+      <div style={{ marginBottom: '16px' }}>
+        <Link to="/" className="btn-primary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <ChevronLeft size={16} /> 返回到首页
+        </Link>
+      </div>
+      <section style={{ marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: '2.5rem', fontWeight: '800', marginBottom: '8px' }}>AI 热点新闻</h1>
           <p style={{ color: 'var(--text-sec)' }}>单页滚动展示最多 50 条热点，快速连续浏览全球资讯摘要。</p>
@@ -350,7 +707,7 @@ const NewsPage = () => {
         <div style={{ textAlign: 'center', padding: '40px' }}>正在加载今日热点...</div>
       ) : (
         <>
-          <div className="news-list">
+          <div className="news-list" id="news-list">
             {visibleNews.map((item: NewsItem) => (
               <div 
                 key={item.id} 
@@ -446,6 +803,7 @@ const NewsPage = () => {
               </div>
             ))}
           </div>
+          <div id="ai-analysis" />
           {news.length === 0 && <div style={{ textAlign: 'center', padding: '40px' }}>今日暂无新闻更新。</div>}
         </>
       )}
@@ -485,13 +843,20 @@ const CategoryPage = ({ category }: { category: { id: string; label: string; ico
 
   return (
     <div className="fade-in">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px' }}>
-        <div className="card-icon" style={{ marginBottom: 0 }}>{category.icon}</div>
-        <h1 style={{ fontSize: '2.5rem', fontWeight: '800', margin: 0 }}>{category.label}</h1>
+      <div style={{ marginBottom: '16px' }}>
+        <Link to="/" className="btn-primary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <ChevronLeft size={16} /> 返回到首页
+        </Link>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div className="card-icon" style={{ marginBottom: 0 }}>{category.icon}</div>
+          <h1 style={{ fontSize: '2.5rem', fontWeight: '800', margin: 0 }}>{category.label}</h1>
+        </div>
       </div>
 
       {githubTop10 && (
-        <section style={{ marginBottom: '28px' }}>
+        <section style={{ marginBottom: '28px' }} id="github-top10">
           <h3 style={{ borderLeft: '3px solid var(--primary-solid)', paddingLeft: '12px', marginBottom: '16px' }}>
             GitHub TOP10
           </h3>
@@ -529,7 +894,7 @@ const CategoryPage = ({ category }: { category: { id: string; label: string; ico
         </section>
       )}
 
-      <section style={{ marginBottom: '40px' }}>
+      <section style={{ marginBottom: '40px' }} id="synced-materials">
         <h3 style={{ borderLeft: '3px solid var(--primary-solid)', paddingLeft: '12px', marginBottom: '20px' }}>已同步资料 ({materials.length})</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px' }}>
           {materials.map((m: Material) => (
@@ -567,7 +932,7 @@ const CategoryPage = ({ category }: { category: { id: string; label: string; ico
         </div>
       </section>
 
-      <section>
+      <section id="practice-cases">
         <h3 style={{ borderLeft: '3px solid var(--primary-solid)', paddingLeft: '12px', marginBottom: '20px' }}>推荐实践案例</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '24px' }}>
           {[1, 2, 3].map(i => (
@@ -686,7 +1051,7 @@ const MaterialDetail = () => {
     <div className="fade-in" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '32px', minHeight: '80vh' }}>
       <aside style={{ background: 'var(--bg-sidebar)', padding: '24px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', height: 'fit-content', position: 'sticky', top: '24px' }}>
         <Link to="/" style={{ color: 'var(--primary-solid)', fontSize: '0.8rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '24px' }}>
-          <ChevronLeft size={16} /> 返回列表
+          <ChevronLeft size={16} /> 返回到首页
         </Link>
         <div className="card-icon" style={{ width: '48px', height: '48px', marginBottom: '16px' }}>
           {material.name.toLowerCase().endsWith('.pdf') ? <FileText size={24} color="var(--primary-solid)" /> : material.isFolder ? <Box size={24} color="var(--primary-solid)" /> : <File size={24} color="var(--primary-solid)" />}
@@ -723,25 +1088,57 @@ const MaterialDetail = () => {
 
 function App() {
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [submenuConfig, setSubmenuConfig] = useState<Record<string, SubMenuItem[]>>({});
+  const [currentRole, setCurrentRole] = useState<'visitor' | 'editor' | 'admin'>('visitor');
+
+  const fetchSubmenuConfig = async () => {
+    try {
+      const res = await axios.get('/api/submenus');
+      setSubmenuConfig(res.data || {});
+    } catch {
+      setSubmenuConfig({});
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const storedRole = localStorage.getItem('role');
+      if (storedRole === 'admin' || storedRole === 'editor' || storedRole === 'visitor') {
+        setCurrentRole(storedRole as 'admin' | 'editor' | 'visitor');
+      } else {
+        localStorage.setItem('role', 'visitor');
+        setCurrentRole('visitor');
+      }
+      fetchSubmenuConfig();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleToggleRole = () => {
+    const nextRole = currentRole === 'visitor' ? 'editor' : currentRole === 'editor' ? 'admin' : 'visitor';
+    localStorage.setItem('role', nextRole);
+    setCurrentRole(nextRole);
+  };
 
   return (
     <Router>
       <div className="app-container">
-        <Sidebar />
+        <Sidebar submenuConfig={submenuConfig} />
         <main className="main-content">
-          <Header />
+          <Header role={currentRole} onToggleRole={handleToggleRole} />
           <div className="page-wrapper">
             <Routes>
               <Route path="/" element={<HomePage />} />
+              <Route path="/admin" element={<AdminConfigPage submenuConfig={submenuConfig} onSaved={fetchSubmenuConfig} onRoleChange={setCurrentRole} />} />
               <Route path="/news" element={<NewsPage />} />
               <Route path="/materials/:id" element={<MaterialDetail />} />
-              {CATEGORIES.map(cat => (
+              {CATEGORIES.filter((cat) => cat.id !== 'news').map(cat => (
                 <Route key={cat.id} path={cat.path} element={<CategoryPage category={cat} />} />
               ))}
               <Route path="/:type/:id" element={<div className="fade-in">
                 <h1 style={{fontSize: '2.5rem'}}>详情页面加载中...</h1>
                 <p>内容正在同步最新实战案例，请稍后。</p>
-                <Link to="/" className="btn-primary" style={{textDecoration:'none', display:'inline-block'}}>返回全景图</Link>
+                <Link to="/" className="btn-primary" style={{textDecoration:'none', display:'inline-block'}}>返回到首页</Link>
               </div>} />
             </Routes>
           </div>
@@ -766,7 +1163,7 @@ function App() {
               </div>
             </div>
           )}
-          
+
           <footer style={{ marginTop: '80px', padding: '40px 0', borderTop: '1px solid var(--border)', color: 'var(--text-sec)', fontSize: '0.9rem', display: 'flex', justifyContent: 'space-between' }}>
             <span>© 2026 AI 数据实践宝库. All Rights Reserved.</span>
             <div style={{ display: 'flex', gap: '24px' }}>
