@@ -3,68 +3,24 @@ dotenv.config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const crypto = require('crypto');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
+const db = require('./db');
 
 const app = express();
 const PORT = 3001;
-const DATA_FILE = path.join(__dirname, 'data.json');
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123456';
-const ADMIN_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
-const adminSessions = new Map();
-const DEFAULT_SUBMENU_CONFIG = {
-    news: [
-        { label: '新闻总览', to: '/news' },
-        { label: '热点列表', to: '/news#news-list' },
-        { label: 'AI 深度摘要', to: '/news#ai-analysis' }
-    ],
-    frameworks: [
-        { label: 'AI 实践框架总览', to: '/frameworks' },
-        { label: '已同步资料', to: '/frameworks#synced-materials' },
-        { label: '推荐实践案例', to: '/frameworks#practice-cases' }
-    ],
-    agents: [
-        { label: 'AI Agent 总览', to: '/agents' },
-        { label: 'GitHub TOP10', to: '/agents#github-top10' },
-        { label: '已同步资料', to: '/agents#synced-materials' },
-        { label: '推荐实践案例', to: '/agents#practice-cases' }
-    ],
-    skills: [
-        { label: 'AI Skill 总览', to: '/skills' },
-        { label: 'GitHub TOP10', to: '/skills#github-top10' },
-        { label: '已同步资料', to: '/skills#synced-materials' },
-        { label: '推荐实践案例', to: '/skills#practice-cases' }
-    ],
-    knowledge: [
-        { label: 'AI 知识库总览', to: '/knowledge' },
-        { label: '已同步资料', to: '/knowledge#synced-materials' },
-        { label: '推荐实践案例', to: '/knowledge#practice-cases' }
-    ],
-    materials: [
-        { label: '学习资料总览', to: '/materials' },
-        { label: '已同步资料', to: '/materials#synced-materials' },
-        { label: '推荐实践案例', to: '/materials#practice-cases' }
-    ],
-    tools: [
-        { label: '好用工具总览', to: '/tools' },
-        { label: '已同步资料', to: '/tools#synced-materials' },
-        { label: '推荐实践案例', to: '/tools#practice-cases' }
-    ],
-    apps: [
-        { label: 'APP 开发总览', to: '/apps' },
-        { label: '已同步资料', to: '/apps#synced-materials' },
-        { label: '推荐实践案例', to: '/apps#practice-cases' }
-    ],
-    webs: [
-        { label: '网页开发总览', to: '/webs' },
-        { label: '已同步资料', to: '/webs#synced-materials' },
-        { label: '推荐实践案例', to: '/webs#practice-cases' }
-    ]
-};
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-me';
 
-const hashPassword = (password = '') => crypto.createHash('sha256').update(password).digest('hex');
+const loginLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 5,
+    message: { error: '登录尝试次数过多，请 10 分钟后再试' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 const sanitizeSubmenuItems = (items) => {
     if (!Array.isArray(items)) return null;
@@ -77,84 +33,77 @@ const sanitizeSubmenuItems = (items) => {
     return normalized.length ? normalized : null;
 };
 
-const normalizeData = (raw = {}) => {
-    const data = { ...raw };
-    let changed = false;
-    if (!Array.isArray(data.skills)) {
-        data.skills = [];
-        changed = true;
-    }
-    if (!Array.isArray(data.posts)) {
-        data.posts = [];
-        changed = true;
-    }
-    if (!Array.isArray(data.news)) {
-        data.news = [];
-        changed = true;
-    }
-    if (!Array.isArray(data.materials)) {
-        data.materials = [];
-        changed = true;
-    }
-    if (!data.submenuConfig || typeof data.submenuConfig !== 'object' || Array.isArray(data.submenuConfig)) {
-        data.submenuConfig = { ...DEFAULT_SUBMENU_CONFIG };
-        changed = true;
-    }
-    if (!data.admin || typeof data.admin !== 'object' || Array.isArray(data.admin)) {
-        data.admin = { passwordHash: hashPassword(ADMIN_PASSWORD), updatedAt: new Date().toISOString() };
-        changed = true;
-    }
-    if (!data.admin.passwordHash) {
-        data.admin.passwordHash = hashPassword(ADMIN_PASSWORD);
-        data.admin.updatedAt = new Date().toISOString();
-        changed = true;
-    }
-    if (!Array.isArray(data.admins)) {
-        data.admins = [
-            { username: 'admin', passwordHash: hashPassword(ADMIN_PASSWORD), roles: ['admin'], updatedAt: new Date().toISOString() }
-        ];
-        changed = true;
-    }
-    return { data, changed };
-};
-
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
-app.get('/api/submenus', (req, res) => {
-    const data = readData();
-    res.json(data.submenuConfig || DEFAULT_SUBMENU_CONFIG);
+// --- Settings API (Public & Admin) ---
+app.get('/api/settings', (req, res) => {
+    const rows = db.prepare('SELECT key, value FROM settings').all();
+    const config = {};
+    for (const row of rows) {
+        try { config[row.key] = JSON.parse(row.value); } 
+        catch { config[row.key] = row.value; }
+    }
+    res.json(config);
 });
 
-app.post('/api/admin/login', (req, res) => {
-    const { username, password } = req.body || {};
-    const data = readData();
-    let roles = [];
-    let loginOk = false;
-    let resolvedUsername = '';
-    if (username && password) {
-        const found = (data.admins || []).find((u) => u.username === username);
-        if (found && hashPassword(password) === found.passwordHash) {
-            roles = Array.isArray(found.roles) ? found.roles : ['admin'];
-            loginOk = true;
-            resolvedUsername = username;
+app.put('/api/admin/settings', requireAdminAuth, (req, res) => {
+    const payload = req.body || {};
+    if (!req.adminRoles.includes('admin')) return res.status(403).json({ error: '权限不足' });
+    
+    db.transaction(() => {
+        const checkStmt = db.prepare('SELECT COUNT(*) as count FROM settings WHERE key = ?');
+        const updateStmt = db.prepare('UPDATE settings SET value = ? WHERE key = ?');
+        const insertStmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
+        for (const [k, v] of Object.entries(payload)) {
+            const valStr = JSON.stringify(v);
+            if (checkStmt.get(k).count > 0) {
+                updateStmt.run(valStr, k);
+            } else {
+                insertStmt.run(k, valStr);
+            }
         }
-    } else if (password && hashPassword(password) === data.admin.passwordHash) {
-        roles = ['admin'];
-        loginOk = true;
-        resolvedUsername = 'admin';
+    })();
+    res.json({ ok: true });
+});
+
+
+// Get all submenus mapping (Legacy Support for frontend temporarily)
+function getAllSubmenus() {
+    const rows = db.prepare('SELECT pageId, items FROM submenus').all();
+    const config = {};
+    for (const row of rows) {
+        try {
+            config[row.pageId] = JSON.parse(row.items);
+        } catch {
+            config[row.pageId] = [];
+        }
     }
-    if (!loginOk) {
-        return res.status(401).json({ error: '用户名或密码错误' });
+    return config;
+}
+
+app.get('/api/submenus', (req, res) => {
+    res.json(getAllSubmenus());
+});
+
+app.post('/api/admin/login', loginLimiter, (req, res) => {
+    const { username, password } = req.body || {};
+    const targetUsername = username ? username : 'admin';
+    const adminUser = db.prepare('SELECT * FROM admins WHERE username = ?').get(targetUsername);
+
+    if (adminUser && password && bcrypt.compareSync(password, adminUser.passwordHash)) {
+        let roles = ['admin'];
+        try { roles = JSON.parse(adminUser.roles); } catch {}
+        
+        const token = jwt.sign({ username: targetUsername, roles }, JWT_SECRET, { expiresIn: '12h' });
+        return res.json({ token, expiresInMs: 12 * 60 * 60 * 1000, username: targetUsername, roles });
     }
-    const token = crypto.randomBytes(32).toString('hex');
-    adminSessions.set(token, { createdAt: Date.now(), expiresAt: Date.now() + ADMIN_TOKEN_TTL_MS, username: resolvedUsername, roles });
-    return res.json({ token, expiresInMs: ADMIN_TOKEN_TTL_MS, username: resolvedUsername, roles });
+
+    return res.status(401).json({ error: '用户名或密码错误' });
 });
 
 app.post('/api/admin/logout', requireAdminAuth, (req, res) => {
-    adminSessions.delete(req.adminToken);
     res.json({ ok: true });
 });
 
@@ -163,8 +112,7 @@ app.get('/api/admin/me', requireAdminAuth, (req, res) => {
 });
 
 app.get('/api/admin/submenus', requireAdminAuth, (req, res) => {
-    const data = readData();
-    res.json(data.submenuConfig || DEFAULT_SUBMENU_CONFIG);
+    res.json(getAllSubmenus());
 });
 
 app.put('/api/admin/submenus/:pageId', requireAdminAuth, (req, res) => {
@@ -177,143 +125,181 @@ app.put('/api/admin/submenus/:pageId', requireAdminAuth, (req, res) => {
     if (!roles.includes('admin') && !roles.includes('editor')) {
         return res.status(403).json({ error: '权限不足，需 editor 或 admin 角色' });
     }
-    const data = readData();
-    data.submenuConfig[pageId] = normalizedItems;
-    writeData(data);
+    
+    const checkStmt = db.prepare('SELECT COUNT(*) as count FROM submenus WHERE pageId = ?').get(pageId);
+    if (checkStmt.count > 0) {
+        db.prepare('UPDATE submenus SET items = ? WHERE pageId = ?').run(JSON.stringify(normalizedItems), pageId);
+    } else {
+        db.prepare('INSERT INTO submenus (pageId, items) VALUES (?, ?)').run(pageId, JSON.stringify(normalizedItems));
+    }
+    
     return res.json({ pageId, items: normalizedItems });
 });
 
 app.put('/api/admin/password', requireAdminAuth, (req, res) => {
     const { oldPassword, newPassword } = req.body || {};
-    const roles = req.adminRoles || [];
-    if (!roles.includes('admin')) {
+    if (!req.adminRoles.includes('admin')) {
         return res.status(403).json({ error: '权限不足，需 admin 角色' });
     }
     if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 6) {
         return res.status(400).json({ error: '新密码至少 6 位' });
     }
-    const data = readData();
-    if (!oldPassword || hashPassword(oldPassword) !== data.admin.passwordHash) {
+
+    const adminUser = db.prepare('SELECT passwordHash FROM admins WHERE username = ?').get(req.adminUsername);
+    if (!adminUser || !bcrypt.compareSync(oldPassword, adminUser.passwordHash)) {
         return res.status(401).json({ error: '旧密码错误' });
     }
-    data.admin.passwordHash = hashPassword(newPassword.trim());
-    data.admin.updatedAt = new Date().toISOString();
-    writeData(data);
-    adminSessions.delete(req.adminToken);
+
+    const newHash = bcrypt.hashSync(newPassword.trim(), 10);
+    db.prepare('UPDATE admins SET passwordHash = ?, updatedAt = ? WHERE username = ?').run(
+        newHash, new Date().toISOString(), req.adminUsername
+    );
     return res.json({ ok: true, message: '密码更新成功，请重新登录' });
 });
 
-// Helper to read data
-const readData = () => {
-    try {
-        if (!fs.existsSync(DATA_FILE)) {
-            return normalizeData({}).data;
-        }
-        const rawData = fs.readFileSync(DATA_FILE, 'utf8');
-        const parsed = JSON.parse(rawData);
-        const { data, changed } = normalizeData(parsed);
-        if (changed) {
-            fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-        }
-        return data;
-    } catch (e) {
-        console.error('Error reading data:', e);
-        return normalizeData({}).data;
-    }
-};
-
-// Helper to write data
-const writeData = (data) => {
-    try {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    } catch (e) {
-        console.error('Error writing data:', e);
-    }
-};
-
-const pruneExpiredSessions = () => {
-    const now = Date.now();
-    for (const [token, session] of adminSessions.entries()) {
-        if (session.expiresAt <= now) {
-            adminSessions.delete(token);
-        }
-    }
-};
-
-const requireAdminAuth = (req, res, next) => {
-    pruneExpiredSessions();
+function requireAdminAuth(req, res, next) {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-    if (!token || !adminSessions.has(token)) {
+    if (!token) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
-    const session = adminSessions.get(token);
-    if (!session || session.expiresAt <= Date.now()) {
-        adminSessions.delete(token);
-        return res.status(401).json({ error: 'Session expired' });
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(401).json({ error: 'Session expired' });
+        }
+        req.adminUsername = decoded.username;
+        req.adminRoles = decoded.roles || [];
+        next();
+    });
+}
+
+// --- Dynamic Menus API ---
+app.get('/api/menus', (req, res) => {
+    const menus = db.prepare('SELECT * FROM menus ORDER BY sort_order ASC').all();
+    res.json(menus);
+});
+
+// --- Dynamic Contents API ---
+app.get('/api/contents', (req, res) => {
+    const { menu_id } = req.query;
+    let query = 'SELECT * FROM contents';
+    let params = [];
+    if (menu_id) {
+        query += ' WHERE menu_id = ?';
+        params.push(menu_id);
     }
-    req.adminToken = token;
-    req.adminUsername = session.username;
-    req.adminRoles = session.roles || [];
-    return next();
-};
+    query += ' ORDER BY sort_order ASC, created_at DESC';
+    const contents = db.prepare(query).all(...params);
+    
+    const results = contents.map(c => {
+        try {
+            return { ...c, meta: JSON.parse(c.meta || '{}') };
+        } catch {
+            return { ...c, meta: {} };
+        }
+    });
+    res.json(results);
+});
+
+app.post('/api/admin/contents', requireAdminAuth, (req, res) => {
+    if (!req.adminRoles.includes('admin') && !req.adminRoles.includes('editor')) {
+        return res.status(403).json({ error: '权限不足' });
+    }
+    const { menu_id, title, type, body, meta, sort_order } = req.body;
+    try {
+        const result = db.prepare('INSERT INTO contents (menu_id, title, type, body, meta, sort_order) VALUES (?, ?, ?, ?, ?, ?)')
+            .run(menu_id || 0, title || '未命名', type || 'richtext', body || '', JSON.stringify(meta || {}), sort_order || 0);
+        res.json({ id: result.lastInsertRowid });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/admin/contents/:id', requireAdminAuth, (req, res) => {
+    if (!req.adminRoles.includes('admin') && !req.adminRoles.includes('editor')) {
+        return res.status(403).json({ error: '权限不足' });
+    }
+    const { menu_id, title, type, body, meta, sort_order } = req.body;
+    try {
+        db.prepare('UPDATE contents SET menu_id = ?, title = ?, type = ?, body = ?, meta = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(menu_id || 0, title, type, body, JSON.stringify(meta || {}), sort_order || 0, req.params.id);
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/admin/contents/:id', requireAdminAuth, (req, res) => {
+    if (!req.adminRoles.includes('admin') && !req.adminRoles.includes('editor')) {
+        return res.status(403).json({ error: '权限不足' });
+    }
+    try {
+        db.prepare('DELETE FROM contents WHERE id = ?').run(req.params.id);
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // --- MATERIAL STORAGE & UPLOAD ---
 app.post('/api/upload', (req, res) => {
     const { name, module, isFolder, files, content } = req.body;
-    const data = readData();
-    if (!data.materials) data.materials = [];
     
     const newMaterial = {
         id: Date.now().toString(),
         name: name || (files && files[0]?.name),
         module: module || 'frameworks',
         timestamp: new Date().toISOString(),
-        isFolder: !!isFolder,
+        isFolder: isFolder ? 1 : 0,
         fileCount: files ? files.length : 1,
         content: content || ''
     };
     
-    data.materials.push(newMaterial);
-    writeData(data);
-    res.status(201).json(newMaterial);
+    db.prepare('INSERT INTO materials (id, name, module, timestamp, isFolder, fileCount, content) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        newMaterial.id, newMaterial.name, newMaterial.module, newMaterial.timestamp, newMaterial.isFolder, newMaterial.fileCount, newMaterial.content
+    );
+    
+    // Map back for frontend
+    res.status(201).json({
+        ...newMaterial,
+        isFolder: !!newMaterial.isFolder
+    });
 });
 
-// Get materials by module
 app.get('/api/materials/:module', (req, res) => {
     const module = req.params.module;
-    const data = readData();
-    const materials = (data.materials || []).filter((m) => m.module === module);
-    res.json(materials);
+    const materials = db.prepare('SELECT id, name, module, timestamp, isFolder, fileCount FROM materials WHERE module = ? ORDER BY timestamp DESC').all(module);
+    
+    const results = materials.map(m => ({
+        ...m,
+        isFolder: m.isFolder === 1
+    }));
+    
+    res.json(results);
 });
 
-// Get individual material
 app.get('/api/materials/detail/:id', (req, res) => {
     const id = req.params.id;
-    const data = readData();
-    const material = (data.materials || []).find((m) => m.id === id);
+    const material = db.prepare('SELECT * FROM materials WHERE id = ?').get(id);
     if (!material) {
         return res.status(404).json({ error: 'Material not found' });
     }
-    res.json(material);
+    res.json({
+        ...material,
+        isFolder: material.isFolder === 1
+    });
 });
 
-// AI Analyze Material using MiniMax
 app.post('/api/materials/analyze/:id', async (req, res) => {
     const id = req.params.id;
-    const data = readData();
-    const material = (data.materials || []).find((m) => m.id === id);
+    const material = db.prepare('SELECT content FROM materials WHERE id = ?').get(id);
     
-    if (!material) {
-        return res.status(404).json({ error: 'Material not found' });
-    }
-
-    if (!material.content) {
+    if (!material || !material.content) {
         return res.json({ analysis: "无法生成摘要：文件内容为空或不支持此类文件格式。" });
     }
 
     if (material.content.startsWith('data:')) {
-        return res.json({ analysis: "AI 摘要目前仅支持文本和 Markdown 格式。PDF/PPT 资料请下载后阅读。" });
+        return res.json({ analysis: "AI 摘要目前仅支持文本。PDF/PPT 资料请下载后阅读。" });
     }
 
     try {
@@ -322,8 +308,8 @@ app.post('/api/materials/analyze/:id', async (req, res) => {
             {
                 model: 'minimax-2.7',
                 messages: [
-                    { role: 'system', content: '你是一个专业的 AI 资料分析助手。请对用户提供的资料内容进行简洁、精准的摘要分析。' },
-                    { role: 'user', content: `请分析以下资料并生成简短摘要：\n\n${material.content.substring(0, 4000)}` }
+                    { role: 'system', content: '你是一个专业的 AI 资料分析助手。请对用户提供内容进行摘要。' },
+                    { role: 'user', content: `分析以下资料：\n\n${material.content.substring(0, 4000)}` }
                 ]
             },
             {
@@ -334,47 +320,33 @@ app.post('/api/materials/analyze/:id', async (req, res) => {
             }
         );
 
-        const analysis = response.data.choices[0]?.message?.content || "分析完成，但未生成内容。";
+        const analysis = response.data.choices[0]?.message?.content || "无摘要。";
         res.json({ analysis });
     } catch (error) {
-        console.error('MiniMax API Error:', error.response?.data || error.message);
-        res.status(500).json({ error: 'AI 分析服务暂时不可用' });
+        res.status(500).json({ error: 'AI 分析不可用' });
     }
 });
 
-// Get all skills
 app.get('/api/skills', (req, res) => {
-    const data = readData();
-    res.json(data.skills);
+    const skills = db.prepare('SELECT * FROM skills').all();
+    res.json(skills);
 });
 
-// Add a new skill
 app.post('/api/skills', (req, res) => {
     const { name, description, category } = req.body;
-    const data = readData();
-    const newSkill = {
-        id: Date.now().toString(),
-        name,
-        description,
-        category
-    };
-    data.skills.push(newSkill);
-    writeData(data);
-    res.status(201).json(newSkill);
+    const id = Date.now().toString();
+    db.prepare('INSERT INTO skills (id, name, description, category) VALUES (?, ?, ?, ?)').run(id, name, description, category);
+    res.status(201).json({ id, name, description, category });
 });
 
-// Get posts for a specific skill
 app.get('/api/skills/:id/posts', (req, res) => {
-    const skillId = req.params.id;
-    const data = readData();
-    const skillPosts = data.posts.filter((p) => p.skillId === skillId);
-    res.json(skillPosts);
+    const posts = db.prepare('SELECT * FROM posts WHERE skillId = ? ORDER BY timestamp DESC').all(req.params.id);
+    res.json(posts);
 });
 
-// Get all news
 app.get('/api/news', (req, res) => {
-    const data = readData();
-    res.json(data.news);
+    const newsList = db.prepare('SELECT * FROM news ORDER BY timestamp DESC').all();
+    res.json(newsList);
 });
 
 app.listen(PORT, '0.0.0.0', () => {

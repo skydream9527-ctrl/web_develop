@@ -1,6 +1,7 @@
 :root {
-  --primary-gradient: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
-  --primary-solid: #00f2fe;
+  --primary-accent: #00f2fe;
+  --primary-gradient: linear-gradient(135deg, var(--primary-accent) 0%, #4facfe 100%);
+  --primary-solid: var(--primary-accent);
   --bg-main: #0a0e14;
   --bg-sidebar: #0f172a;
   --bg-card: #1e293b;
@@ -11,6 +12,17 @@
   --radius-sm: 8px;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
   --transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+  --sidebar-width: 280px;
+}
+
+body.light-theme {
+  --bg-main: #f8fafc;
+  --bg-sidebar: #ffffff;
+  --bg-card: #ffffff;
+  --text-main: #0f172a;
+  --text-sec: #64748b;
+  --border: #e2e8f0;
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
 
 * { box-sizing: border-box; }
@@ -31,7 +43,7 @@ body {
 
 /* 恢复并优化左侧侧边栏 - Flow 风格 */
 .sidebar {
-  width: 280px;
+  width: var(--sidebar-width);
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   position: fixed;
@@ -79,7 +91,7 @@ body {
 /* 主内容区优化 */
 .main-content {
   flex: 1;
-  margin-left: 280px;
+  margin-left: var(--sidebar-width);
   padding: 48px 64px;
   background: var(--bg-main);
 }

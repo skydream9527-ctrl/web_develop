@@ -1,29 +1,13 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+const path = require('path');
+const Database = require('better-sqlite3');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DATA_FILE = path.join(__dirname, 'data.json');
+const db = new Database(path.join(__dirname, 'data.db'));
 
 const keywords = ['AI', '人工智能', '大模型', 'LLM', '深度学习', 'AIGC', '机器学习'];
-
-// Helper to read data
-const readData = () => {
-    const rawData = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(rawData);
-};
-
-// Helper to write data
-const writeData = (data: any) => {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-};
 
 async function fetchNews() {
     console.log(`[${new Date().toISOString()}] Fetching news for keywords: ${keywords.join(', ')}`);
     
-    // In a real production scenario, you would use a News API or search API.
-    // Here we generate 50 mock news articles that look realistic.
     const news = [];
     const sources = ['新浪科技', '腾讯新闻', '36Kr', '量子位', '机器之心', 'IT之家', '澎湃新闻'];
     
@@ -40,10 +24,14 @@ async function fetchNews() {
         });
     }
 
-    const data = readData();
-    data.news = news;
-    writeData(data);
-    console.log(`Successfully updated 50 news articles.`);
+    db.transaction(() => {
+        db.prepare('DELETE FROM news').run();
+        const insertNews = db.prepare('INSERT INTO news (id, title, url, source, summary, timestamp) VALUES (?, ?, ?, ?, ?, ?)');
+        for (const item of news) {
+            insertNews.run(item.id, item.title, item.url, item.source, item.summary, item.timestamp);
+        }
+    })();
+    console.log(`Successfully updated 50 news articles in SQLite.`);
 }
 
 fetchNews().catch(err => {

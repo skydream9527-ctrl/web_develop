@@ -7,6 +7,10 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
+import mammoth from 'mammoth';
+import * as xlsx from 'xlsx';
 import './index.css';
 
 type NewsItem = {
@@ -207,12 +211,26 @@ const AdminConfigPage = ({
   const [adminToken, setAdminToken] = useState<string>(localStorage.getItem('admin_token') || '');
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [activeTab, setActiveTab] = useState<'menus' | 'appearance' | 'contents'>('menus');
   const [selectedPage, setSelectedPage] = useState('news');
+
+  // Contents
+  const [contentTitle, setContentTitle] = useState('');
+  const [contentBody, setContentBody] = useState('');
+  const [contentMenuId, setContentMenuId] = useState('');
+  const [contents, setContents] = useState<any[]>([]);
+
   const [editingItems, setEditingItems] = useState<SubMenuItem[]>([]);
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Settings states
+  const [themeMode, setThemeMode] = useState('auto');
+  const [accentColor, setAccentColor] = useState('#00f2fe');
+  const [sidebarWidth, setSidebarWidth] = useState('280');
+  const [siteTitle, setSiteTitle] = useState('AI 数据实践宝库');
 
   const availablePages = Array.from(new Set(['news', ...CATEGORIES.map((c) => c.id), ...Object.keys(submenuConfig || {})]));
 
@@ -227,17 +245,27 @@ const AdminConfigPage = ({
     setEditingItems(source.map((item) => ({ ...item })));
   }, [selectedPage, submenuConfig]);
 
-  const buildAuthHeaders = () => ({
-    headers: {
-      Authorization: `Bearer ${adminToken}`
+  useEffect(() => {
+    if (adminToken && activeTab === 'appearance') {
+      axios.get('/api/settings').then(res => {
+        if (res.data.theme_mode) setThemeMode(res.data.theme_mode);
+        if (res.data.accent_color) setAccentColor(res.data.accent_color);
+        if (res.data.sidebar_width) setSidebarWidth(res.data.sidebar_width);
+        if (res.data.site_title) setSiteTitle(res.data.site_title);
+      }).catch(() => {});
+    } else if (adminToken && activeTab === 'contents') {
+      axios.get('/api/contents').then(res => setContents(res.data || [])).catch(() => {});
     }
+  }, [adminToken, activeTab]);
+
+  const buildAuthHeaders = () => ({
+    headers: { Authorization: `Bearer ${adminToken}` }
   });
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     if (!loginPassword.trim()) return;
-    setBusy(true);
-    setStatusMessage('');
+    setBusy(true); setStatusMessage('');
     try {
       const payload: { username?: string; password: string } = { password: loginPassword.trim() };
       if (loginUsername.trim()) payload.username = loginUsername.trim();
@@ -247,39 +275,23 @@ const AdminConfigPage = ({
       localStorage.setItem('admin_token', token);
       setAdminToken(token);
       const roles: string[] = res.data?.roles || [];
-      if (roles.includes('admin')) {
-        localStorage.setItem('role', 'admin');
-        onRoleChange('admin');
-      } else if (roles.includes('editor')) {
-        localStorage.setItem('role', 'editor');
-        onRoleChange('editor');
-      }
-      setLoginPassword('');
-      setLoginUsername('');
-      setStatusMessage('登录成功，可以开始配置子菜单。');
+      if (roles.includes('admin')) { localStorage.setItem('role', 'admin'); onRoleChange('admin'); }
+      else if (roles.includes('editor')) { localStorage.setItem('role', 'editor'); onRoleChange('editor'); }
+      setLoginPassword(''); setLoginUsername('');
+      setStatusMessage('登录成功，可以开始配置。');
     } catch (error: unknown) {
-      const errorMessage = axios.isAxiosError(error) ? error.response?.data?.error : '';
-      setStatusMessage(errorMessage || '登录失败，请检查密码。');
-    } finally {
-      setBusy(false);
-    }
+      if (axios.isAxiosError(error)) setStatusMessage(error.response?.data?.error || '登录失败，请检查密码。');
+      else setStatusMessage('网络错误。');
+    } finally { setBusy(false); }
   };
 
   const handleLogout = async () => {
     setBusy(true);
-    try {
-      await axios.post('/api/admin/logout', {}, buildAuthHeaders());
-    } catch {
-      setStatusMessage('已退出登录。');
-    } finally {
-      localStorage.removeItem('admin_token');
-      setAdminToken('');
-      setOldPassword('');
-      setNewPassword('');
-      setStatusMessage('已退出登录。');
-      localStorage.setItem('role', 'visitor');
-      onRoleChange('visitor');
-      setBusy(false);
+    try { await axios.post('/api/admin/logout', {}, buildAuthHeaders()); } catch {}
+    finally {
+      localStorage.removeItem('admin_token'); setAdminToken('');
+      setOldPassword(''); setNewPassword(''); setStatusMessage('已退出登录。');
+      localStorage.setItem('role', 'visitor'); onRoleChange('visitor'); setBusy(false);
     }
   };
 
@@ -287,42 +299,78 @@ const AdminConfigPage = ({
     const payloadItems = editingItems
       .map((item) => ({ label: item.label.trim(), to: item.to.trim() }))
       .filter((item) => item.label && item.to);
-    if (!payloadItems.length) {
-      setStatusMessage('至少保留一个有效菜单项。');
-      return;
-    }
-    setBusy(true);
-    setStatusMessage('');
+    if (!payloadItems.length) { setStatusMessage('至少保留一个有效菜单项。'); return; }
+    setBusy(true); setStatusMessage('');
     try {
       await axios.put(`/api/admin/submenus/${selectedPage}`, { items: payloadItems }, buildAuthHeaders());
-      await onSaved();
-      setStatusMessage('保存成功。');
+      await onSaved(); setStatusMessage('菜单保存成功。');
     } catch (error: unknown) {
-      const errorMessage = axios.isAxiosError(error) ? error.response?.data?.error : '';
-      setStatusMessage(errorMessage || '保存失败，请稍后重试。');
-    } finally {
-      setBusy(false);
-    }
+      if (axios.isAxiosError(error)) setStatusMessage(error.response?.data?.error || '保存失败。');
+    } finally { setBusy(false); }
+  };
+
+  const handleSaveContent = async () => {
+    if (!contentTitle.trim() || !contentBody.trim()) { setStatusMessage('标题和内容不可为空'); return; }
+    setBusy(true); setStatusMessage('');
+    try {
+      await axios.post('/api/admin/contents', { title: contentTitle, body: contentBody, menu_id: contentMenuId, type: 'richtext' }, buildAuthHeaders());
+      setStatusMessage('内容发布成功。');
+      setContentTitle(''); setContentBody('');
+      axios.get('/api/contents').then(res => setContents(res.data || []));
+    } catch {
+      setStatusMessage('保存内容失败。');
+    } finally { setBusy(false); }
+  };
+
+  const handleDeleteContent = async (id: number) => {
+    if (!window.confirm('确定要删除吗？')) return;
+    setBusy(true);
+    try {
+      await axios.delete(`/api/admin/contents/${id}`, buildAuthHeaders());
+      setStatusMessage('删除成功。');
+      axios.get('/api/contents').then(res => setContents(res.data || []));
+    } catch {
+      setStatusMessage('删除失败。');
+    } finally { setBusy(false); }
+  };
+
+  const handleSaveSettings = async () => {
+    setBusy(true); setStatusMessage('');
+    try {
+      await axios.put('/api/admin/settings', {
+        theme_mode: themeMode,
+        accent_color: accentColor,
+        sidebar_width: sidebarWidth,
+        site_title: siteTitle
+      }, buildAuthHeaders());
+      setStatusMessage('外观设置保存成功，已全局生效。');
+      // Apply immediately locally
+      const root = document.documentElement;
+      root.style.setProperty('--primary-accent', accentColor);
+      root.style.setProperty('--sidebar-width', `${sidebarWidth}px`);
+      document.title = siteTitle;
+      if (themeMode === 'light') document.body.classList.add('light-theme');
+      else if (themeMode === 'dark') document.body.classList.remove('light-theme');
+      else {
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) document.body.classList.add('light-theme');
+        else document.body.classList.remove('light-theme');
+      }
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) setStatusMessage(error.response?.data?.error || '配置保存失败。');
+    } finally { setBusy(false); }
   };
 
   const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault();
     if (!oldPassword.trim() || !newPassword.trim()) return;
-    setBusy(true);
-    setStatusMessage('');
+    setBusy(true); setStatusMessage('');
     try {
       await axios.put('/api/admin/password', { oldPassword: oldPassword.trim(), newPassword: newPassword.trim() }, buildAuthHeaders());
-      localStorage.removeItem('admin_token');
-      setAdminToken('');
-      setOldPassword('');
-      setNewPassword('');
-      setStatusMessage('密码已更新，请使用新密码重新登录。');
+      localStorage.removeItem('admin_token'); setAdminToken('');
+      setOldPassword(''); setNewPassword(''); setStatusMessage('密码已更新，请使用新密码重新登录。');
     } catch (error: unknown) {
-      const errorMessage = axios.isAxiosError(error) ? error.response?.data?.error : '';
-      setStatusMessage(errorMessage || '修改密码失败。');
-    } finally {
-      setBusy(false);
-    }
+      if (axios.isAxiosError(error)) setStatusMessage(error.response?.data?.error || '修改密码失败。');
+    } finally { setBusy(false); }
   };
 
   const updateEditingItem = (index: number, key: 'label' | 'to', value: string) => {
@@ -337,111 +385,132 @@ const AdminConfigPage = ({
         </Link>
       </div>
       <div style={{ background: 'var(--bg-sidebar)', border: '1px solid var(--border)', borderRadius: '16px', padding: '20px' }}>
-        <div style={{ marginBottom: '16px' }}>
-          <h2 style={{ margin: 0, fontSize: '1.2rem' }}>后台子菜单配置</h2>
+        <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ margin: 0, fontSize: '1.2rem' }}>后台管理控制台</h2>
+          {adminToken && (
+            <button onClick={handleLogout} className="btn-pagination" style={{ width: 'auto', borderRadius: '8px', padding: '0 12px' }}>
+              退出登录
+            </button>
+          )}
         </div>
 
         {!adminToken ? (
           <form onSubmit={handleLogin} style={{ display: 'grid', gap: '12px' }}>
-            <input
-              type="text"
-              value={loginUsername}
-              onChange={(e) => setLoginUsername(e.target.value)}
-              placeholder="管理员用户名（可选）"
-              style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
-            />
-            <input
-              type="password"
-              value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
-              placeholder="请输入管理员密码"
-              style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
-            />
-            <button type="submit" className="btn-primary" disabled={busy} style={{ width: 'fit-content' }}>
-              {busy ? '登录中...' : '登录配置后台'}
-            </button>
-            <div style={{ color: 'var(--text-sec)', fontSize: '0.85rem' }}>默认密码来自后端环境变量 ADMIN_PASSWORD，建议首次登录后立即修改。</div>
+            <input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="管理员用户名（默认为 admin）" style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
+            <input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="请输入管理员密码" style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
+            <button type="submit" className="btn-primary" disabled={busy} style={{ width: 'fit-content' }}>{busy ? '安全校验中...' : '安全登录系统'}</button>
           </form>
         ) : (
-          <div style={{ display: 'grid', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-              <select
-                value={selectedPage}
-                onChange={(e) => setSelectedPage(e.target.value)}
-                style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
-              >
-                {availablePages.map((pageId) => (
-                  <option key={pageId} value={pageId}>{pageId}</option>
-                ))}
-              </select>
-              <button onClick={handleLogout} className="btn-pagination" style={{ width: 'auto', borderRadius: '8px', padding: '0 12px' }}>
-                退出登录
-              </button>
+          <div>
+            <div style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '16px', marginBottom: '20px' }}>
+              <button onClick={() => setActiveTab('menus')} style={{ background: activeTab === 'menus' ? 'var(--primary-gradient)' : 'transparent', color: activeTab === 'menus' ? '#000' : 'var(--text-sec)', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}>导航菜单配置</button>
+              <button onClick={() => setActiveTab('contents')} style={{ background: activeTab === 'contents' ? 'var(--primary-gradient)' : 'transparent', color: activeTab === 'contents' ? '#000' : 'var(--text-sec)', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}>图文内容发布</button>
+              <button onClick={() => setActiveTab('appearance')} style={{ background: activeTab === 'appearance' ? 'var(--primary-gradient)' : 'transparent', color: activeTab === 'appearance' ? '#000' : 'var(--text-sec)', border: 'none', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}>全局外观定制</button>
             </div>
 
-            <div style={{ display: 'grid', gap: '10px' }}>
-              {editingItems.map((item, index) => (
-                <div key={`${selectedPage}-${index}`} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px' }}>
-                  <input
-                    value={item.label}
-                    onChange={(e) => updateEditingItem(index, 'label', e.target.value)}
-                    placeholder="菜单名称"
-                    style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
-                  />
-                  <input
-                    value={item.to}
-                    onChange={(e) => updateEditingItem(index, 'to', e.target.value)}
-                    placeholder="跳转地址，例如 /agents#github-top10"
-                    style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
-                  />
-                  <button
-                    onClick={() => setEditingItems((prev) => prev.filter((_, i) => i !== index))}
-                    className="btn-pagination"
-                    style={{ width: 'auto', borderRadius: '8px', padding: '0 10px' }}
-                  >
-                    删除
-                  </button>
+            {activeTab === 'menus' && (
+              <div style={{ display: 'grid', gap: '16px' }}>
+                <select value={selectedPage} onChange={(e) => setSelectedPage(e.target.value)} style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}>
+                  {availablePages.map((pageId) => <option key={pageId} value={pageId}>编辑节点: {pageId}</option>)}
+                </select>
+                <div style={{ display: 'grid', gap: '10px' }}>
+                  {editingItems.map((item, index) => (
+                    <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px' }}>
+                      <input value={item.label} onChange={(e) => updateEditingItem(index, 'label', e.target.value)} placeholder="菜单名称" style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
+                      <input value={item.to} onChange={(e) => updateEditingItem(index, 'to', e.target.value)} placeholder="跳转路径，例如 /agents#github" style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
+                      <button onClick={() => setEditingItems((prev) => prev.filter((_, i) => i !== index))} className="btn-pagination" style={{ width: 'auto', borderRadius: '8px', padding: '0 10px' }}>删除</button>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={() => setEditingItems((prev) => [...prev, { label: '', to: '' }])} className="btn-pagination" style={{ width: 'auto', borderRadius: '8px', padding: '0 12px' }}>添加菜单项</button>
+                  <button onClick={handleSaveSubmenu} className="btn-primary" disabled={busy}>{busy ? '应用中...' : '提交菜单修改'}</button>
+                </div>
+              </div>
+            )}
 
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <button
-                onClick={() => setEditingItems((prev) => [...prev, { label: '', to: '' }])}
-                className="btn-pagination"
-                style={{ width: 'auto', borderRadius: '8px', padding: '0 12px' }}
-              >
-                新增菜单项
-              </button>
-              <button onClick={handleSaveSubmenu} className="btn-primary" disabled={busy}>
-                {busy ? '保存中...' : '保存当前页面子菜单'}
-              </button>
-            </div>
+            {activeTab === 'contents' && (
+              <div style={{ display: 'grid', gap: '16px' }}>
+                <div style={{ padding: '16px', border: '1px dashed var(--border)', borderRadius: '8px' }}>
+                  <h3 style={{ margin: '0 0 16px 0', fontSize: '1.05rem', borderLeft: '3px solid var(--primary-solid)', paddingLeft: '8px' }}>发布新稿件 / 富文本</h3>
+                  <div style={{ display: 'grid', gap: '12px' }}>
+                    <input type="text" placeholder="文章标题" value={contentTitle} onChange={e => setContentTitle(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
+                    <select value={contentMenuId} onChange={e => setContentMenuId(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}>
+                      <option value="">（自由存放，不绑定到指定模块分类）</option>
+                      {availablePages.map(pageId => <option key={pageId} value={pageId}>关联模块: {pageId}</option>)}
+                    </select>
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '6px' }}>
+                      <ReactQuill theme="snow" value={contentBody} onChange={setContentBody} style={{ color: 'var(--text-main)', height: '240px', marginBottom: '40px' }} />
+                    </div>
+                    <button onClick={handleSaveContent} className="btn-primary" disabled={busy} style={{ width: 'fit-content' }}>{busy ? '保存中...' : '提交图文内容'}</button>
+                  </div>
+                </div>
 
-            <form onSubmit={handleChangePassword} style={{ display: 'grid', gap: '8px', marginTop: '8px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
-              <div style={{ fontWeight: 700 }}>修改管理员密码</div>
-              <input
-                type="password"
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-                placeholder="旧密码"
-                style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
-              />
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="新密码（至少 6 位）"
-                style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}
-              />
-              <button type="submit" className="btn-primary" disabled={busy} style={{ width: 'fit-content' }}>
-                更新密码
-              </button>
+                <div>
+                  <h3 style={{ margin: '0 0 16px 0', fontSize: '1.05rem', borderLeft: '3px solid var(--primary-solid)', paddingLeft: '8px' }}>已发布内容列表 ({contents.length})</h3>
+                  <div style={{ display: 'grid', gap: '8px' }}>
+                    {contents.length === 0 && <div style={{ color: 'var(--text-sec)', fontSize: '0.85rem' }}>暂无发布的内容。</div>}
+                    {contents.map(c => (
+                      <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: 'var(--bg-main)', border: '1px solid var(--border)', borderRadius: '8px', alignItems: 'center' }}>
+                        <div>
+                          <strong style={{ display: 'block', marginBottom: '4px' }}>{c.title}</strong>
+                          <span style={{ fontSize: '0.75rem', color: '#666', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' }}>挂载模块: {c.menu_id || '未绑定'} / 时间: {new Date(c.created_at).toLocaleString()}</span>
+                        </div>
+                        <button onClick={() => handleDeleteContent(c.id)} className="btn-pagination" style={{ width: 'auto', padding: '0 12px', borderRadius: '4px', border: '1px solid red', color: 'red' }}>删除</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'appearance' && (
+              <div style={{ display: 'grid', gap: '20px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-sec)', fontSize: '0.85rem' }}>空间总览标题</label>
+                  <input type="text" value={siteTitle} onChange={e => setSiteTitle(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-sec)', fontSize: '0.85rem' }}>色彩主题规范</label>
+                    <select value={themeMode} onChange={e => setThemeMode(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }}>
+                      <option value="auto">跟随系统设置适配 (Auto)</option>
+                      <option value="dark">沉浸极客深色 (Dark)</option>
+                      <option value="light">清爽阅读浅色 (Light)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-sec)', fontSize: '0.85rem' }}>全局强调色 (Accent Color)</label>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                      <input type="color" value={accentColor} onChange={e => setAccentColor(e.target.value)} style={{ width: '40px', height: '40px', padding: '0', border: 'none', background: 'transparent', cursor: 'pointer' }} />
+                      <input type="text" value={accentColor} onChange={e => setAccentColor(e.target.value)} style={{ flex: 1, padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)', fontFamily: 'monospace' }} />
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-sec)', fontSize: '0.85rem' }}>
+                    侧边空间宽度: {sidebarWidth}px
+                  </label>
+                  <input type="range" min="200" max="400" value={sidebarWidth} onChange={e => setSidebarWidth(e.target.value)} style={{ width: '100%', accentColor: 'var(--primary-solid)' }} />
+                </div>
+                <button onClick={handleSaveSettings} className="btn-primary" disabled={busy} style={{ width: 'fit-content' }}>
+                  {busy ? '引擎同步中...' : '发布并应用新外观'}
+                </button>
+              </div>
+            )}
+
+            <form onSubmit={handleChangePassword} style={{ display: 'grid', gap: '8px', marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
+              <div style={{ fontWeight: 700, marginBottom: '8px' }}>高级与安全: 账户重置</div>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} placeholder="现实验证密码" style={{ flex: 1, padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
+                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="新的安全密钥（至少6位）" style={{ flex: 1, padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
+                <button type="submit" className="btn-primary" disabled={busy} style={{ padding: '8px 24px' }}>修改密码</button>
+              </div>
             </form>
           </div>
         )}
 
-        {statusMessage && <div style={{ marginTop: '14px', color: 'var(--text-sec)', fontSize: '0.85rem' }}>{statusMessage}</div>}
+        {statusMessage && <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', borderLeft: '3px solid var(--primary-solid)', color: 'var(--text-main)', fontSize: '0.85rem' }}>ℹ️ {statusMessage}</div>}
       </div>
     </div>
   );
@@ -813,6 +882,7 @@ const NewsPage = () => {
 
 const CategoryPage = ({ category }: { category: { id: string; label: string; icon: ReactNode } }) => {
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [contents, setContents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
 
@@ -823,6 +893,11 @@ const CategoryPage = ({ category }: { category: { id: string; label: string; ico
         setLoading(false);
       })
       .catch(() => setLoading(false));
+
+    axios.get(`/api/contents?menu_id=${category.id}`)
+      .then((res) => {
+        setContents(res.data);
+      }).catch(() => {});
   }, [category.id]);
 
   const handleAIAnalyze = async (e: MouseEvent, id: string) => {
@@ -894,6 +969,20 @@ const CategoryPage = ({ category }: { category: { id: string; label: string; ico
         </section>
       )}
 
+      {contents.length > 0 && (
+        <section style={{ marginBottom: '40px' }} id="module-contents">
+          <h3 style={{ borderLeft: '3px solid var(--primary-solid)', paddingLeft: '12px', marginBottom: '20px' }}>精选专栏文章</h3>
+          <div style={{ display: 'grid', gap: '20px' }}>
+            {contents.map((c) => (
+              <div key={c.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px', padding: '24px' }}>
+                <h4 style={{ margin: '0 0 16px 0', fontSize: '1.4rem', color: 'var(--text-main)' }}>{c.title}</h4>
+                <div className="markdown-body" dangerouslySetInnerHTML={{ __html: c.body }} style={{ padding: '0' }} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section style={{ marginBottom: '40px' }} id="synced-materials">
         <h3 style={{ borderLeft: '3px solid var(--primary-solid)', paddingLeft: '12px', marginBottom: '20px' }}>已同步资料 ({materials.length})</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px' }}>
@@ -955,12 +1044,40 @@ const MaterialDetail = () => {
   const { id } = useParams();
   const [material, setMaterial] = useState<Material | null>(null);
   const [loading, setLoading] = useState(true);
+  const [docHtml, setDocHtml] = useState('');
+  const [excelHtml, setExcelHtml] = useState('');
+  const [parseError, setParseError] = useState('');
 
   useEffect(() => {
     axios.get(`/api/materials/detail/${id}`)
-      .then(res => {
-        setMaterial(res.data);
+      .then(async res => {
+        const mat = res.data;
+        setMaterial(mat);
         setLoading(false);
+        
+        const fn = (mat.name || '').toLowerCase();
+        if (mat.content && typeof mat.content === 'string' && mat.content.startsWith('data:')) {
+          try {
+            const base64Str = mat.content.split(',')[1];
+            if (!base64Str) return;
+            const binaryString = window.atob(base64Str);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            if (fn.endsWith('.docx')) {
+               const result = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
+               setDocHtml(result.value);
+            } else if (fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.csv')) {
+               const workbook = xlsx.read(bytes.buffer, { type: 'array' });
+               const firstSheetName = workbook.SheetNames[0];
+               const html = xlsx.utils.sheet_to_html(workbook.Sheets[firstSheetName]);
+               setExcelHtml(html);
+            }
+          } catch (err) {
+             setParseError('本地解析引擎异常：' + (err as Error).message);
+          }
+        }
       })
       .catch(() => setLoading(false));
   }, [id]);
@@ -974,75 +1091,64 @@ const MaterialDetail = () => {
     const isDataUrl = typeof content === 'string' && content.startsWith('data:');
     const isPdf = fileName.endsWith('.pdf');
     const isMarkdown = fileName.endsWith('.md') || fileName.endsWith('.markdown');
-    const isText = fileName.endsWith('.txt') || fileName.endsWith('.json') || fileName.endsWith('.csv') || fileName.endsWith('.log');
+    const isText = fileName.endsWith('.txt') || fileName.endsWith('.json');
     const hasTextContent = typeof content === 'string' && content.length > 0 && !isDataUrl;
+    const isDocx = fileName.endsWith('.docx');
+    const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv');
+    const isPpt = fileName.endsWith('.ppt') || fileName.endsWith('.pptx');
 
     if (!content) {
+      return <div style={{ color: '#555', fontStyle: 'italic', textAlign: 'center', padding: '100px 0' }}>未包含可阅读的数据流。</div>;
+    }
+
+    if (parseError) {
       return (
-        <div style={{ color: '#555', fontStyle: 'italic', textAlign: 'center', padding: '100px 0' }}>
-          当前资料未写入可预览内容。支持在线阅读的格式为 PDF、Markdown、文本与 JSON。
+        <div style={{ textAlign: 'center', padding: '40px', color: 'red' }}>
+          <h3>文档解析失败</h3>
+          <p>{parseError}</p>
+          <a href={content} download={material.name} className="btn-primary" style={{ display: 'inline-block', marginTop: '16px' }}>回退：直接下载原文件</a>
+        </div>
+      );
+    }
+
+    if (isDocx && docHtml) {
+      return <div className="markdown-body" dangerouslySetInnerHTML={{ __html: docHtml }} style={{ background: '#fff', padding: '24px', borderRadius: '8px', color: '#000' }} />;
+    }
+
+    if (isExcel && excelHtml) {
+      return (
+        <div style={{ overflowX: 'auto', background: '#fff', padding: '16px', borderRadius: '8px', color: '#000' }}>
+          <div dangerouslySetInnerHTML={{ __html: excelHtml }} style={{ borderCollapse: 'collapse', width: '100%' }} />
         </div>
       );
     }
 
     if (isPdf && isDataUrl) {
-      return (
-        <iframe 
-          src={content} 
-          width="100%" 
-          height="800px" 
-          style={{ border: 'none', borderRadius: '8px' }}
-          title={material.name}
-        />
-      );
-    }
-
-    if (isPdf) {
-      return (
-        <div style={{ color: '#555', textAlign: 'center', padding: '100px 0' }}>
-          PDF 文件缺少可预览数据，请重新上传该文件后查看。
-        </div>
-      );
+      return <iframe src={content} width="100%" height="800px" style={{ border: 'none', borderRadius: '8px' }} title={material.name} />;
     }
 
     if (isMarkdown && hasTextContent) {
-      return (
-        <div className="markdown-body" style={{ color: 'var(--text-main)' }}>
-          <ReactMarkdown>{content}</ReactMarkdown>
-        </div>
-      );
+      return <div className="markdown-body" style={{ color: 'var(--text-main)' }}><ReactMarkdown>{content}</ReactMarkdown></div>;
     }
 
     if (isText || hasTextContent) {
-      return (
-        <article style={{ 
-          fontSize: '1.1rem', 
-          lineHeight: '1.8', 
-          color: 'var(--text-main)', 
-          whiteSpace: 'pre-wrap',
-          fontFamily: 'Inter, system-ui, sans-serif'
-        }}>
-          {content}
-        </article>
-      );
+      return <article style={{ fontSize: '1.05rem', lineHeight: '1.8', whiteSpace: 'pre-wrap' }}>{content}</article>;
     }
 
-    if (fileName.endsWith('.ppt') || fileName.endsWith('.pptx') || isDataUrl) {
+    if (isPpt) {
       return (
-        <div style={{ textAlign: 'center', padding: '40px' }}>
-          <Box size={48} color="var(--primary-solid)" style={{ marginBottom: '16px' }} />
-          <h3>暂不支持在线预览该文件类型</h3>
-          <p style={{ color: 'var(--text-sec)' }}>当前支持 PDF、Markdown、文本与 JSON 在线阅读。其他类型请下载本地查看。</p>
-          <a href={content} download={material.name} className="btn-primary" style={{ textDecoration: 'none', display: 'inline-block', marginTop: '16px' }}>
-            下载并在本地查看
-          </a>
+        <div style={{ textAlign: 'center', padding: '60px 40px' }}>
+          <h3 style={{ color: 'var(--primary-solid)', marginBottom: '16px' }}>该文件为演示文稿 (PPT)</h3>
+          <p style={{ color: 'var(--text-sec)', marginBottom: '32px' }}>出于脱机数据保护，PPT 系列文档请提取至本地客户端观阅。</p>
+          <a href={content} download={material.name} className="btn-primary" style={{ textDecoration: 'none', padding: '12px 24px' }}>下载演示文稿</a>
         </div>
       );
     }
 
     return (
-      <div style={{ color: '#555', textAlign: 'center', padding: '100px 0' }}>
-        文件内容暂不可读，请重新上传为支持格式后查看。
+      <div style={{ textAlign: 'center', padding: '60px 40px' }}>
+         <h3>该类型文件不支持本地原生渲染</h3>
+         <a href={content} download={material.name} className="btn-primary" style={{ marginTop: '20px', display: 'inline-block' }}>安全下载至本地</a>
       </div>
     );
   };
@@ -1091,6 +1197,32 @@ function App() {
   const [submenuConfig, setSubmenuConfig] = useState<Record<string, SubMenuItem[]>>({});
   const [currentRole, setCurrentRole] = useState<'visitor' | 'editor' | 'admin'>('visitor');
 
+  const applySettings = (config: any) => {
+    const root = document.documentElement;
+    if (config.accent_color) root.style.setProperty('--primary-accent', config.accent_color);
+    if (config.sidebar_width) root.style.setProperty('--sidebar-width', `${config.sidebar_width}px`);
+    if (config.site_title) document.title = config.site_title;
+    
+    if (config.theme_mode === 'light') {
+      document.body.classList.add('light-theme');
+    } else if (config.theme_mode === 'dark') {
+      document.body.classList.remove('light-theme');
+    } else {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        document.body.classList.add('light-theme');
+      } else {
+        document.body.classList.remove('light-theme');
+      }
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await axios.get('/api/settings');
+      applySettings(res.data);
+    } catch {}
+  };
+
   const fetchSubmenuConfig = async () => {
     try {
       const res = await axios.get('/api/submenus');
@@ -1110,6 +1242,7 @@ function App() {
         setCurrentRole('visitor');
       }
       fetchSubmenuConfig();
+      fetchSettings();
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
