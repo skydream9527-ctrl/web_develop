@@ -1,39 +1,70 @@
 const path = require('path');
 const Database = require('better-sqlite3');
+const Parser = require('rss-parser');
 
 const db = new Database(path.join(__dirname, 'data.db'));
+const parser = new Parser();
 
-const keywords = ['AI', '人工智能', '大模型', 'LLM', '深度学习', 'AIGC', '机器学习'];
+// Multiple fallback RSS feeds for AI / Tech news
+const RSS_FEEDS = [
+    'https://hnrss.org/newest?q=AI',
+    'https://export.arxiv.org/rss/cs.AI',
+    'https://techcrunch.com/category/artificial-intelligence/feed/',
+];
 
-async function fetchNews() {
-    console.log(`[${new Date().toISOString()}] Fetching news for keywords: ${keywords.join(', ')}`);
+/**
+ * Fetch daily AI news using RSS and synchronize with database.
+ */
+async function fetchAndSyncNews() {
+    console.log(`[${new Date().toISOString()}] 执行新闻数据抓取与同步...`);
     
-    const news = [];
-    const sources = ['新浪科技', '腾讯新闻', '36Kr', '量子位', '机器之心', 'IT之家', '澎湃新闻'];
+    let allItems: any[] = [];
     
-    for (let i = 1; i <= 50; i++) {
-        const keyword = keywords[Math.floor(Math.random() * keywords.length)];
-        const source = sources[Math.floor(Math.random() * sources.length)];
-        news.push({
-            id: Date.now().toString() + i,
-            title: `${keyword}领域重大突破：${source}报道其在行业内的最新进展 ${i}`,
-            summary: `近日，${source}发布详细报告，指出${keyword}在深度学习算法优化方面取得了显著成果。该突破有望将大模型训练效率提升 40% 以上，并大幅降低推理能耗。行业专家认为，这将加速 AI 在边缘计算设备上的普及。`,
-            url: `https://www.google.com/search?q=${encodeURIComponent(keyword + ' ' + source)}`,
-            source: source,
-            timestamp: new Date().toISOString()
-        });
+    for (const feedUrl of RSS_FEEDS) {
+        try {
+            console.log(`正在从 ${feedUrl} 抓取数据...`);
+            const feed = await parser.parseURL(feedUrl);
+            const items = feed.items.slice(0, 15).map(item => ({
+                id: `news_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                title: item.title || '无标题新闻',
+                url: item.link || '',
+                source: feed.title || 'Tech News',
+                summary: item.contentSnippet || item.content || '无摘要内容',
+                timestamp: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString()
+            }));
+            allItems = allItems.concat(items);
+        } catch (error: any) {
+            console.error(`从 ${feedUrl} 抓取失败: ${error.message}`);
+        }
     }
-
+    
+    console.log(`共抓取到 ${allItems.length} 条数据，准备去重入库...`);
+    
+    let addedCount = 0;
+    
     db.transaction(() => {
-        db.prepare('DELETE FROM news').run();
-        const insertNews = db.prepare('INSERT INTO news (id, title, url, source, summary, timestamp) VALUES (?, ?, ?, ?, ?, ?)');
-        for (const item of news) {
-            insertNews.run(item.id, item.title, item.url, item.source, item.summary, item.timestamp);
+        const checkStmt = db.prepare('SELECT COUNT(*) as count FROM news WHERE url = ?');
+        const insertStmt = db.prepare('INSERT INTO news (id, title, url, source, summary, timestamp) VALUES (?, ?, ?, ?, ?, ?)');
+        
+        for (const item of allItems) {
+            // Skip invalid items
+            if (!item.url || !item.url.startsWith('http')) continue;
+            
+            // Check for duplicates based on URL
+            const existing = checkStmt.get(item.url) as { count: number };
+            if (existing && existing.count === 0) {
+                insertStmt.run(item.id, item.title, item.url, item.source, item.summary, item.timestamp);
+                addedCount++;
+            }
         }
     })();
-    console.log(`Successfully updated 50 news articles in SQLite.`);
+    
+    console.log(`成功新增了 ${addedCount} 条实时的 AI 新闻。`);
+    
+    const remaining = (db.prepare('SELECT COUNT(*) as count FROM news').get() as { count: number });
+    console.log(`当前数据库中共有 ${remaining.count} 条有效新闻。`);
 }
 
-fetchNews().catch(err => {
+fetchAndSyncNews().catch(err => {
     console.error('Error fetching news:', err);
 });

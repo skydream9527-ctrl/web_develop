@@ -61,6 +61,13 @@ db.exec(`
     value TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS embeddings (
+    id TEXT PRIMARY KEY,
+    ref_id TEXT,
+    chunk_text TEXT,
+    embedding_json TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS menus (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -145,7 +152,7 @@ if (isMigratedCheck.count === 0 && fs.existsSync(dataFilePath)) {
             
             // Note: Since old passwords were SHA256, migrating them perfectly to Bcrypt is tricky.
             // We just set a new default bcrypt password for migrated admin.
-            const newAdminHash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123456', 10);
+            const newAdminHash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin', 10);
             const insertAdmin = db.prepare('INSERT INTO admins (username, passwordHash, roles, updatedAt) VALUES (?, ?, ?, ?)');
             insertAdmin.run('admin', newAdminHash, JSON.stringify(['admin']), new Date().toISOString());
         })();
@@ -154,7 +161,7 @@ if (isMigratedCheck.count === 0 && fs.existsSync(dataFilePath)) {
         console.error('Failure during migration:', e);
     }
 } else if (isMigratedCheck.count === 0) {
-    const defaultPasswordHash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123456', 10);
+    const defaultPasswordHash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin', 10);
     db.prepare('INSERT INTO admins (username, passwordHash, roles, updatedAt) VALUES (?, ?, ?, ?)').run(
         'admin', defaultPasswordHash, JSON.stringify(['admin']), new Date().toISOString()
     );

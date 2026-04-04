@@ -1,17 +1,23 @@
 import { useState, useEffect, type FormEvent, type MouseEvent, type ReactNode } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, useParams, useNavigate } from 'react-router-dom';
 import { 
   Box, Bot, Cpu, Database, Layout, Globe, Sun, 
   Zap, Home, ArrowRight, Search, Newspaper, ExternalLink,
-  ChevronLeft, FileText, File, Upload, X
+  ChevronLeft, FileText, File, X, Eye, Download, Info, MessageSquare, Send, Briefcase
 } from 'lucide-react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
+import { BlockNoteView } from "@blocknote/mantine";
+import { useCreateBlockNote } from "@blocknote/react";
+import "@blocknote/core/fonts/inter.css";
+import "@blocknote/mantine/style.css";
 import mammoth from 'mammoth';
 import * as xlsx from 'xlsx';
 import './index.css';
+
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
+import { Tree, type NodeModel } from '@minoru/react-dnd-treeview';
 
 type NewsItem = {
   id: string;
@@ -35,6 +41,8 @@ type Material = {
 type SubMenuItem = {
   label: string;
   to: string;
+  children?: SubMenuItem[];
+  desc?: string;
 };
 
 // --- Aligned Data ---
@@ -48,6 +56,7 @@ const CATEGORIES = [
   { id: 'tools', label: '好用工具', icon: <Layout size={24} />, desc: '提升开发效率的 AI 工具箱，包含代码生成、图像识别等实用工具。', path: '/tools' },
   { id: 'apps', label: 'APP 开发', icon: <Globe size={24} />, desc: 'AI 助手、创作工具等实际落地应用的移动端开发全流程。', path: '/apps' },
   { id: 'webs', label: '网页开发', icon: <Search size={24} />, desc: '基于 AI 的网页抓取、自动化分析及智能交互的前端技术。', path: '/webs' },
+  { id: 'business', label: '前端业务', icon: <Briefcase size={24} />, desc: '沉浸前端真实业务场景模块，从架构设计到效能提升的深度实践。', path: '/business' },
 ];
 
 const decodeHtmlEntities = (value: string = '') => {
@@ -98,6 +107,14 @@ const Sidebar = ({ submenuConfig }: { submenuConfig: Record<string, SubMenuItem[
       ]
     : [{ label: '返回主页面', to: '/' }];
   const activeSubMenu = subMenus[currentSubPageId] || defaultSubMenu;
+  
+  if (currentCategory && currentCategory.id === 'business') {
+    const hasUpload = activeSubMenu.some(item => item.to === '/business/upload');
+    if (!hasUpload) {
+      activeSubMenu.splice(1, 0, { label: '上传与预览', to: '/business/upload', desc: '上传文档当页立即预览' });
+    }
+  }
+
   const currentPathWithHash = `${location.pathname}${location.hash || ''}`;
 
   return (
@@ -131,19 +148,44 @@ const Sidebar = ({ submenuConfig }: { submenuConfig: Record<string, SubMenuItem[
           <div style={{ marginTop: '20px', padding: '0 16px', fontSize: '0.75rem', fontWeight: 700, color: '#AAA', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>
             {currentCategory?.label || '子页面'} 子菜单
           </div>
-          {activeSubMenu.map((item) => (
-            <Link key={item.to} to={item.to} className={`nav-item ${currentPathWithHash === item.to || location.pathname.startsWith(item.to.split('#')[0]) ? 'active' : ''}`}>
-              <ArrowRight size={16} />
-              <span style={{ marginLeft: '12px' }}>{item.label}</span>
-            </Link>
+          {activeSubMenu.map((item, idx) => (
+             <RecursiveSidebarItem key={item.to || idx} item={item} currentPathWithHash={currentPathWithHash} />
           ))}
         </nav>
       )}
       <div style={{ padding: '16px', background: 'rgba(0,0,0,0.03)', borderRadius: '12px', fontSize: '0.8rem' }}>
         <div style={{ fontWeight: 700, marginBottom: '4px' }}>新功能上线</div>
-        <div style={{ color: 'var(--text-sec)' }}>已支持 PDF/Markdown 在线阅读</div>
+        <div style={{ color: 'var(--text-sec)' }}>已支持 AI RAG 知识检索</div>
       </div>
     </aside>
+  );
+};
+
+const RecursiveSidebarItem = ({ item, currentPathWithHash, depth = 0 }: { item: SubMenuItem, currentPathWithHash: string, depth?: number }) => {
+  const [isOpen, setIsOpen] = useState(true);
+  const hasChildren = item.children && item.children.length > 0;
+  
+  return (
+    <div style={{ marginLeft: depth > 0 ? '16px' : '0' }}>
+      <Link 
+        to={item.to || '#'} 
+        onClick={(e) => { 
+          if(hasChildren && !item.to) { e.preventDefault(); setIsOpen(!isOpen); } 
+        }} 
+        className={`nav-item ${(item.to && (currentPathWithHash === item.to || location.pathname.startsWith(item.to.split('#')[0]))) ? 'active' : ''}`}
+        style={{ paddingLeft: depth === 0 ? '16px' : '8px' }}
+      >
+        <ArrowRight size={16} style={{ opacity: depth > 0 ? 0.5 : 1, transform: hasChildren && isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
+        <span style={{ marginLeft: '12px' }}>{item.label}</span>
+      </Link>
+      {hasChildren && isOpen && (
+         <div style={{ borderLeft: '1px solid var(--border)', marginLeft: '24px', paddingLeft: '8px', borderLeftColor: 'rgba(150,150,150,0.2)' }}>
+            {item.children!.map((child, i) => (
+               <RecursiveSidebarItem key={child.to || i} item={child} currentPathWithHash={currentPathWithHash} depth={depth + 1} />
+            ))}
+         </div>
+      )}
+    </div>
   );
 };
 
@@ -175,23 +217,25 @@ const Header = ({ role, onToggleRole }: { role: 'visitor' | 'editor' | 'admin'; 
       >
         当前角色：{role}
       </button>
-      <Link
-        to="/admin"
-        style={{
-          border: '1px solid var(--border)',
-          background: 'var(--bg-sidebar)',
-          color: 'var(--text-main)',
-          borderRadius: '999px',
-          padding: '0 14px',
-          height: '40px',
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          textDecoration: 'none'
-        }}
-      >
-        后台配置
-      </Link>
+      {role === 'admin' && (
+        <Link
+          to="/admin"
+          style={{
+            border: '1px solid var(--border)',
+            background: 'var(--bg-sidebar)',
+            color: 'var(--text-main)',
+            borderRadius: '999px',
+            padding: '0 14px',
+            height: '40px',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            textDecoration: 'none'
+          }}
+        >
+          后台配置
+        </Link>
+      )}
       <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--bg-sidebar)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
         <Sun size={20} />
       </div>
@@ -215,12 +259,12 @@ const AdminConfigPage = ({
   const [selectedPage, setSelectedPage] = useState('news');
 
   // Contents
+  const editor = useCreateBlockNote();
   const [contentTitle, setContentTitle] = useState('');
   const [contentBody, setContentBody] = useState('');
   const [contentMenuId, setContentMenuId] = useState('');
   const [contents, setContents] = useState<any[]>([]);
 
-  const [editingItems, setEditingItems] = useState<SubMenuItem[]>([]);
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
@@ -240,9 +284,33 @@ const AdminConfigPage = ({
     }
   }, [selectedPage, availablePages]);
 
+  const flattenTree = (items: SubMenuItem[], parentId: string | number = 0): NodeModel<{to:string}>[] => {
+    let result: NodeModel<{to:string}>[] = [];
+    items.forEach(item => {
+      const id = Math.random().toString(36).substr(2, 9);
+      result.push({ id, parent: parentId, text: item.label, droppable: true, data: { to: item.to } });
+      if (item.children) {
+        result = result.concat(flattenTree(item.children, id));
+      }
+    });
+    return result;
+  };
+
+  const nestTree = (flat: NodeModel<{to:string}>[], parentId: string | number = 0): SubMenuItem[] => {
+    return flat
+      .filter(node => node.parent === parentId)
+      .map(node => ({
+        label: node.text,
+        to: node.data?.to || '',
+        children: nestTree(flat, node.id)
+      }));
+  };
+
+  const [treeData, setTreeData] = useState<NodeModel<{to:string}>[]>([]);
+  
   useEffect(() => {
     const source = submenuConfig[selectedPage] || [];
-    setEditingItems(source.map((item) => ({ ...item })));
+    setTreeData(flattenTree(source));
   }, [selectedPage, submenuConfig]);
 
   useEffect(() => {
@@ -296,14 +364,12 @@ const AdminConfigPage = ({
   };
 
   const handleSaveSubmenu = async () => {
-    const payloadItems = editingItems
-      .map((item) => ({ label: item.label.trim(), to: item.to.trim() }))
-      .filter((item) => item.label && item.to);
-    if (!payloadItems.length) { setStatusMessage('至少保留一个有效菜单项。'); return; }
     setBusy(true); setStatusMessage('');
     try {
-      await axios.put(`/api/admin/submenus/${selectedPage}`, { items: payloadItems }, buildAuthHeaders());
-      await onSaved(); setStatusMessage('菜单保存成功。');
+      const newSubmenus = { ...submenuConfig, [selectedPage]: nestTree(treeData) };
+      await axios.put('/api/admin/submenus', { submenus: newSubmenus }, buildAuthHeaders());
+      await onSaved();
+      setStatusMessage('保存成功！');
     } catch (error: unknown) {
       if (axios.isAxiosError(error)) setStatusMessage(error.response?.data?.error || '保存失败。');
     } finally { setBusy(false); }
@@ -373,10 +439,6 @@ const AdminConfigPage = ({
     } finally { setBusy(false); }
   };
 
-  const updateEditingItem = (index: number, key: 'label' | 'to', value: string) => {
-    setEditingItems((prev) => prev.map((item, i) => (i === index ? { ...item, [key]: value } : item)));
-  };
-
   return (
     <div className="fade-in" style={{ maxWidth: '980px' }}>
       <div style={{ marginBottom: '16px' }}>
@@ -414,16 +476,41 @@ const AdminConfigPage = ({
                   {availablePages.map((pageId) => <option key={pageId} value={pageId}>编辑节点: {pageId}</option>)}
                 </select>
                 <div style={{ display: 'grid', gap: '10px' }}>
-                  {editingItems.map((item, index) => (
-                    <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '8px' }}>
-                      <input value={item.label} onChange={(e) => updateEditingItem(index, 'label', e.target.value)} placeholder="菜单名称" style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
-                      <input value={item.to} onChange={(e) => updateEditingItem(index, 'to', e.target.value)} placeholder="跳转路径，例如 /agents#github" style={{ padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} />
-                      <button onClick={() => setEditingItems((prev) => prev.filter((_, i) => i !== index))} className="btn-pagination" style={{ width: 'auto', borderRadius: '8px', padding: '0 10px' }}>删除</button>
-                    </div>
-                  ))}
+                  <DndProvider backend={HTML5Backend}>
+                    <Tree
+                      tree={treeData}
+                      rootId={0}
+                      onDrop={(newTree) => setTreeData(newTree as NodeModel<{to:string}>[])}
+                      classes={{
+                        root: "tree-root",
+                        draggingSource: "tree-dragging",
+                        dropTarget: "tree-drop-target"
+                      }}
+                      render={(node, { depth, isOpen, onToggle }) => (
+                        <div style={{ marginLeft: depth * 24, display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', padding: '4px', background: 'var(--bg-main)', border: '1px dashed var(--border)', borderRadius: '6px' }}>
+                          <button onClick={onToggle} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-sec)', display: 'flex', alignItems: 'center' }}>
+                            <ArrowRight size={14} style={{ transform: isOpen ? 'rotate(90deg)' : 'none', opacity: node.droppable ? 1 : 0.2 }}/>
+                          </button>
+                          <input 
+                            value={node.text} 
+                            onChange={e => setTreeData(treeData.map(n => n.id === node.id ? { ...n, text: e.target.value } : n))}
+                            placeholder="菜单名称"
+                            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)', width: '160px' }}
+                          />
+                          <input 
+                            value={node.data?.to} 
+                            onChange={e => setTreeData(treeData.map(n => n.id === node.id ? { ...n, data: { to: e.target.value } } : n))}
+                            placeholder="路径 (可为空)"
+                            style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)', flex: 1 }}
+                          />
+                          <button onClick={() => setTreeData(treeData.filter(n => n.id !== node.id))} className="btn-pagination" style={{ width: 'auto', padding: '0 8px', color: 'red', borderColor: 'red' }}><X size={14}/></button>
+                        </div>
+                      )}
+                    />
+                  </DndProvider>
                 </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={() => setEditingItems((prev) => [...prev, { label: '', to: '' }])} className="btn-pagination" style={{ width: 'auto', borderRadius: '8px', padding: '0 12px' }}>添加菜单项</button>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                  <button onClick={() => setTreeData([...treeData, { id: Math.random().toString(36).substr(2,9), parent: 0, text: '新菜单项', droppable: true, data: { to: '' } }])} className="btn-pagination" style={{ width: 'auto', borderRadius: '8px', padding: '0 12px' }}>+ 添加顶级菜单</button>
                   <button onClick={handleSaveSubmenu} className="btn-primary" disabled={busy}>{busy ? '应用中...' : '提交菜单修改'}</button>
                 </div>
               </div>
@@ -439,8 +526,15 @@ const AdminConfigPage = ({
                       <option value="">（自由存放，不绑定到指定模块分类）</option>
                       {availablePages.map(pageId => <option key={pageId} value={pageId}>关联模块: {pageId}</option>)}
                     </select>
-                    <div style={{ background: 'var(--bg-card)', borderRadius: '6px' }}>
-                      <ReactQuill theme="snow" value={contentBody} onChange={setContentBody} style={{ color: 'var(--text-main)', height: '240px', marginBottom: '40px' }} />
+                    <div style={{ background: 'var(--bg-card)', borderRadius: '6px', padding: '16px 0', minHeight: '300px', border: '1px solid var(--border)' }}>
+                      <BlockNoteView
+                        editor={editor}
+                        theme={themeMode === 'light' ? 'light' : 'dark'}
+                        onChange={async () => {
+                          const html = await editor.blocksToHTMLLossy(editor.document);
+                          setContentBody(html);
+                        }}
+                      />
                     </div>
                     <button onClick={handleSaveContent} className="btn-primary" disabled={busy} style={{ width: 'fit-content' }}>{busy ? '保存中...' : '提交图文内容'}</button>
                   </div>
@@ -543,9 +637,10 @@ const GITHUB_TOP10: Record<'agents' | 'skills', Array<{ name: string; url: strin
   ]
 };
 
-const FileUpload = ({ compact = false, onUploaded }: { compact?: boolean; onUploaded?: () => void }) => {
+const FileUpload = ({ compact = false, onUploaded, onUploadedId, targetModuleOverride }: { compact?: boolean; onUploaded?: () => void; onUploadedId?: (id: string) => void; targetModuleOverride?: string }) => {
+  const navigate = useNavigate();
   const [files, setFiles] = useState<FileList | null>(null);
-  const [targetModule, setTargetModule] = useState('frameworks');
+  const [targetModule, setTargetModule] = useState(targetModuleOverride || 'frameworks');
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const folderInputProps: Record<string, string> = { webkitdirectory: '', directory: '' };
@@ -555,55 +650,45 @@ const FileUpload = ({ compact = false, onUploaded }: { compact?: boolean; onUplo
     setUploading(true);
     setProgress(0);
     
-    const interval = setInterval(() => {
-      setProgress(prev => (prev < 90 ? prev + 10 : 90));
-    }, 100);
-
     try {
       const file = files[0];
-      let content = "";
-      
-      // Handle different file types
-      if (files.length === 1) {
-        const fileName = file.name.toLowerCase();
-        if (fileName.endsWith('.pdf') || fileName.endsWith('.ppt') || fileName.endsWith('.pptx')) {
-          content = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.readAsDataURL(file);
-          });
-        } else if (file.type.startsWith('text/') || fileName.endsWith('.md') || fileName.endsWith('.txt') || fileName.endsWith('.json')) {
-          content = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target?.result as string);
-            reader.readAsText(file);
-          });
-        }
-      }
-
-      const fileList: Array<{ name: string; size: number }> = Array.from(files).map((f: File) => ({ name: f.name, size: f.size }));
       const webkitRelativePath = (file as unknown as { webkitRelativePath?: string }).webkitRelativePath;
       const isFolder = files.length > 1 || !!webkitRelativePath;
+      const filename = isFolder ? (webkitRelativePath || '').split('/')[0] : file.name;
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('name', filename);
+      formData.append('module', targetModule);
+      formData.append('isFolder', String(!!isFolder));
+      formData.append('fileCount', String(files.length));
       
-      await axios.post('/api/upload', { 
-        name: isFolder ? (webkitRelativePath || '').split('/')[0] : file.name,
-        module: targetModule,
-        isFolder: !!isFolder,
-        files: fileList,
-        content: content
+      const uploadRes = await axios.post('/api/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setProgress(percentCompleted);
+          }
+        }
       });
       
-      clearInterval(interval);
       setProgress(100);
+      const newMaterialId = uploadRes.data?.id;
       setTimeout(() => {
-        alert('上传成功！资料已同步到模块页面。');
         setUploading(false);
         setFiles(null);
         setProgress(0);
         onUploaded?.();
+        if (newMaterialId) {
+          if (onUploadedId) {
+            onUploadedId(newMaterialId);
+          } else {
+            navigate(`/materials/${newMaterialId}`);
+          }
+        }
       }, 500);
     } catch {
-      clearInterval(interval);
       alert('上传失败，请检查网络或后端服务。');
       setUploading(false);
     }
@@ -858,16 +943,22 @@ const NewsPage = () => {
                   >
                     <Bot size={12} /> {analyzing === item.id ? '分析中...' : 'AI 深度摘要'}
                   </button>
-                  <button
-                    onClick={(e: MouseEvent<HTMLButtonElement>) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      openExternalLink(item.url);
-                    }}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}
-                  >
-                    <ExternalLink size={14} color="#AAA" />
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="news-url-badge">
+                      <ExternalLink size={10} />
+                      {(() => { try { return new URL(item.url).hostname; } catch { return '原文链接'; } })()}
+                    </span>
+                    <button
+                      onClick={(e: MouseEvent<HTMLButtonElement>) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openExternalLink(item.url);
+                      }}
+                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 0 }}
+                    >
+                      <ExternalLink size={14} color="#AAA" />
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -880,7 +971,7 @@ const NewsPage = () => {
   );
 };
 
-const CategoryPage = ({ category }: { category: { id: string; label: string; icon: ReactNode } }) => {
+const CategoryPage = ({ category, submenuConfig }: { category: { id: string; label: string; icon: ReactNode }; submenuConfig: Record<string, SubMenuItem[]> }) => {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [contents, setContents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -929,6 +1020,44 @@ const CategoryPage = ({ category }: { category: { id: string; label: string; ico
           <h1 style={{ fontSize: '2.5rem', fontWeight: '800', margin: 0 }}>{category.label}</h1>
         </div>
       </div>
+
+      {submenuConfig[category.id] && submenuConfig[category.id].length > 0 && (
+        <section style={{ marginBottom: '40px' }}>
+          <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Eye size={22} color="var(--primary-solid)" /> 子菜单预览
+          </h2>
+          <p style={{ color: 'var(--text-sec)', marginBottom: '20px' }}>点击预览卡片右下角的“进入页面”按钮，即可跳转到对应内容。</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+            {submenuConfig[category.id].map((item: SubMenuItem) => (
+              <div key={item.to} className="submenu-preview-card">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                  <ArrowRight size={16} color="var(--primary-solid)" />
+                  <strong style={{ fontSize: '1rem' }}>{item.label}</strong>
+                </div>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-sec)', margin: '0 0 auto 0', lineHeight: 1.5 }}>
+                  {item.desc || `查看 ${item.label} 相关内容与资源`}
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                  <Link
+                    to={item.to}
+                    className="btn-enter-page"
+                    onClick={(e) => {
+                      if (item.to.includes('#')) {
+                        e.preventDefault();
+                        const hash = item.to.split('#')[1];
+                        const el = document.getElementById(hash);
+                        if (el) el.scrollIntoView({ behavior: 'smooth' });
+                      }
+                    }}
+                  >
+                    进入页面 <ArrowRight size={14} />
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {githubTop10 && (
         <section style={{ marginBottom: '28px' }} id="github-top10">
@@ -1040,8 +1169,7 @@ const CategoryPage = ({ category }: { category: { id: string; label: string; ico
   );
 };
 
-const MaterialDetail = () => {
-  const { id } = useParams();
+const DocumentPreview = ({ id, isPreview = false }: { id: string; isPreview?: boolean }) => {
   const [material, setMaterial] = useState<Material | null>(null);
   const [loading, setLoading] = useState(true);
   const [docHtml, setDocHtml] = useState('');
@@ -1056,23 +1184,34 @@ const MaterialDetail = () => {
         setLoading(false);
         
         const fn = (mat.name || '').toLowerCase();
-        if (mat.content && typeof mat.content === 'string' && mat.content.startsWith('data:')) {
+        if (mat.content && typeof mat.content === 'string') {
           try {
-            const base64Str = mat.content.split(',')[1];
-            if (!base64Str) return;
-            const binaryString = window.atob(base64Str);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
+            let bytes: Uint8Array | null = null;
+            if (mat.content.startsWith('data:')) {
+              const base64Str = mat.content.split(',')[1];
+              if (!base64Str) return;
+              const binaryString = window.atob(base64Str);
+              bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+              }
+            } else if (mat.content.startsWith('/uploads/')) {
+              if (fn.endsWith('.docx') || fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.csv')) {
+                 const fileRes = await axios.get(mat.content, { responseType: 'arraybuffer' });
+                 bytes = new Uint8Array(fileRes.data);
+              }
             }
-            if (fn.endsWith('.docx')) {
-               const result = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-               setDocHtml(result.value);
-            } else if (fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.csv')) {
-               const workbook = xlsx.read(bytes.buffer, { type: 'array' });
-               const firstSheetName = workbook.SheetNames[0];
-               const html = xlsx.utils.sheet_to_html(workbook.Sheets[firstSheetName]);
-               setExcelHtml(html);
+            
+            if (bytes) {
+              if (fn.endsWith('.docx')) {
+                 const result = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer as ArrayBuffer });
+                 setDocHtml(result.value);
+              } else if (fn.endsWith('.xlsx') || fn.endsWith('.xls') || fn.endsWith('.csv')) {
+                 const workbook = xlsx.read(bytes.buffer, { type: 'array' });
+                 const firstSheetName = workbook.SheetNames[0];
+                 const html = xlsx.utils.sheet_to_html(workbook.Sheets[firstSheetName]);
+                 setExcelHtml(html);
+              }
             }
           } catch (err) {
              setParseError('本地解析引擎异常：' + (err as Error).message);
@@ -1094,6 +1233,7 @@ const MaterialDetail = () => {
     const isText = fileName.endsWith('.txt') || fileName.endsWith('.json');
     const hasTextContent = typeof content === 'string' && content.length > 0 && !isDataUrl;
     const isDocx = fileName.endsWith('.docx');
+    const isDoc = fileName.endsWith('.doc') && !fileName.endsWith('.docx');
     const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv');
     const isPpt = fileName.endsWith('.ppt') || fileName.endsWith('.pptx');
 
@@ -1115,6 +1255,24 @@ const MaterialDetail = () => {
       return <div className="markdown-body" dangerouslySetInnerHTML={{ __html: docHtml }} style={{ background: '#fff', padding: '24px', borderRadius: '8px', color: '#000' }} />;
     }
 
+    if (isDoc && (isDataUrl || content.startsWith('/uploads/'))) {
+      return (
+        <div style={{ padding: '40px' }}>
+          <div style={{ textAlign: 'center', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '16px', padding: '40px', maxWidth: '500px', margin: '0 auto' }}>
+            <div className="card-icon" style={{ width: '64px', height: '64px', margin: '0 auto 20px', background: 'linear-gradient(135deg, #2B5797, #4078c0)' }}>
+              <FileText size={32} color="#fff" />
+            </div>
+            <span style={{ display: 'inline-block', padding: '4px 12px', background: 'rgba(43,87,151,0.15)', color: '#2B5797', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, marginBottom: '16px' }}>Word 文档 (.doc)</span>
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '8px', wordBreak: 'break-all' }}>{material.name}</h3>
+            <p style={{ color: 'var(--text-sec)', marginBottom: '24px', fontSize: '0.85rem' }}>.doc 格式文档请下载后使用 Word 或 WPS 打开（浏览器仅支持 .docx 在线预览）。</p>
+            <a href={content} download={material.name} className="btn-primary" style={{ textDecoration: 'none', padding: '12px 32px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <Download size={16} /> 下载 Word 文档
+            </a>
+          </div>
+        </div>
+      );
+    }
+
     if (isExcel && excelHtml) {
       return (
         <div style={{ overflowX: 'auto', background: '#fff', padding: '16px', borderRadius: '8px', color: '#000' }}>
@@ -1123,7 +1281,7 @@ const MaterialDetail = () => {
       );
     }
 
-    if (isPdf && isDataUrl) {
+    if (isPdf && (isDataUrl || content.startsWith('/uploads/'))) {
       return <iframe src={content} width="100%" height="800px" style={{ border: 'none', borderRadius: '8px' }} title={material.name} />;
     }
 
@@ -1137,10 +1295,22 @@ const MaterialDetail = () => {
 
     if (isPpt) {
       return (
-        <div style={{ textAlign: 'center', padding: '60px 40px' }}>
-          <h3 style={{ color: 'var(--primary-solid)', marginBottom: '16px' }}>该文件为演示文稿 (PPT)</h3>
-          <p style={{ color: 'var(--text-sec)', marginBottom: '32px' }}>出于脱机数据保护，PPT 系列文档请提取至本地客户端观阅。</p>
-          <a href={content} download={material.name} className="btn-primary" style={{ textDecoration: 'none', padding: '12px 24px' }}>下载演示文稿</a>
+        <div style={{ padding: '40px' }}>
+          <div style={{ textAlign: 'center', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '16px', padding: '40px', maxWidth: '500px', margin: '0 auto' }}>
+            <div className="card-icon" style={{ width: '64px', height: '64px', margin: '0 auto 20px', background: 'linear-gradient(135deg, #FF6B35, #F7931E)' }}>
+              <FileText size={32} color="#fff" />
+            </div>
+            <span style={{ display: 'inline-block', padding: '4px 12px', background: 'rgba(255,107,53,0.15)', color: '#FF6B35', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, marginBottom: '16px' }}>PPT 演示文稿</span>
+            <h3 style={{ color: 'var(--text-main)', marginBottom: '8px', wordBreak: 'break-all' }}>{material.name}</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', margin: '20px 0', fontSize: '0.85rem', color: 'var(--text-sec)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}><Info size={14} /> 上传时间: {new Date(material.timestamp).toLocaleString()}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}><Info size={14} /> 所属模块: {CATEGORIES.find(c => c.id === material.module)?.label || material.module}</div>
+            </div>
+            <p style={{ color: 'var(--text-sec)', marginBottom: '24px', fontSize: '0.85rem' }}>PPT 文件暂不支持浏览器内预览，请下载至本地使用 PowerPoint 或 WPS 打开。</p>
+            <a href={content} download={material.name} className="btn-primary" style={{ textDecoration: 'none', padding: '12px 32px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+              <Download size={16} /> 下载演示文稿
+            </a>
+          </div>
         </div>
       );
     }
@@ -1156,13 +1326,31 @@ const MaterialDetail = () => {
   return (
     <div className="fade-in" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '32px', minHeight: '80vh' }}>
       <aside style={{ background: 'var(--bg-sidebar)', padding: '24px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', height: 'fit-content', position: 'sticky', top: '24px' }}>
-        <Link to="/" style={{ color: 'var(--primary-solid)', fontSize: '0.8rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '24px' }}>
-          <ChevronLeft size={16} /> 返回到首页
-        </Link>
+        {!isPreview && (
+          <Link to="/" style={{ color: 'var(--primary-solid)', fontSize: '0.8rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '24px' }}>
+            <ChevronLeft size={16} /> 返回到首页
+          </Link>
+        )}
         <div className="card-icon" style={{ width: '48px', height: '48px', marginBottom: '16px' }}>
-          {material.name.toLowerCase().endsWith('.pdf') ? <FileText size={24} color="var(--primary-solid)" /> : material.isFolder ? <Box size={24} color="var(--primary-solid)" /> : <File size={24} color="var(--primary-solid)" />}
+          {material.name.toLowerCase().endsWith('.pdf') ? <FileText size={24} color="var(--primary-solid)" /> : material.name.toLowerCase().endsWith('.ppt') || material.name.toLowerCase().endsWith('.pptx') ? <FileText size={24} color="#FF6B35" /> : material.name.toLowerCase().endsWith('.doc') || material.name.toLowerCase().endsWith('.docx') ? <FileText size={24} color="#2B5797" /> : material.isFolder ? <Box size={24} color="var(--primary-solid)" /> : <File size={24} color="var(--primary-solid)" />}
         </div>
-        <h2 style={{ fontSize: '1.2rem', marginBottom: '16px', wordBreak: 'break-all' }}>{material.name}</h2>
+        <h2 style={{ fontSize: '1.2rem', marginBottom: '8px', wordBreak: 'break-all' }}>{material.name}</h2>
+        {(() => {
+          const ext = material.name.split('.').pop()?.toUpperCase() || '';
+          const typeMap: Record<string, { label: string; color: string }> = {
+            'PDF': { label: 'PDF 文档', color: '#E53E3E' },
+            'DOCX': { label: 'Word 文档', color: '#2B5797' },
+            'DOC': { label: 'Word 文档', color: '#2B5797' },
+            'PPT': { label: 'PPT 演示文稿', color: '#FF6B35' },
+            'PPTX': { label: 'PPT 演示文稿', color: '#FF6B35' },
+            'MD': { label: 'Markdown', color: '#00b4d8' },
+            'TXT': { label: '文本文件', color: '#94a3b8' },
+          };
+          const info = typeMap[ext];
+          return info ? (
+            <span style={{ display: 'inline-block', padding: '3px 10px', background: `${info.color}22`, color: info.color, borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700, marginBottom: '16px' }}>{info.label}</span>
+          ) : null;
+        })()}
         <div style={{ fontSize: '0.8rem', color: '#666', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div>
             <label style={{ display: 'block', color: '#AAA', marginBottom: '2px' }}>上传时间</label>
@@ -1170,13 +1358,18 @@ const MaterialDetail = () => {
           </div>
           <div>
             <label style={{ display: 'block', color: '#AAA', marginBottom: '2px' }}>文件类型</label>
-            {material.isFolder ? `${material.fileCount} 个文件 (文件夹)` : '单文件资料'}
+            {material.isFolder ? `${material.fileCount} 个文件 (文件夹)` : `单文件资料 (.${material.name.split('.').pop()})`}
           </div>
           <div>
             <label style={{ display: 'block', color: '#AAA', marginBottom: '2px' }}>所属模块</label>
             {CATEGORIES.find(c => c.id === material.module)?.label || material.module}
           </div>
         </div>
+        {material.content && typeof material.content === 'string' && material.content.startsWith('data:') && (
+          <a href={material.content} download={material.name} className="btn-primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '20px', textDecoration: 'none', fontSize: '0.85rem', padding: '10px 16px' }}>
+            <Download size={14} /> 下载原文件
+          </a>
+        )}
       </aside>
 
       <main style={{ background: 'var(--bg-sidebar)', padding: '48px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
@@ -1189,11 +1382,113 @@ const MaterialDetail = () => {
   );
 };
 
+const MaterialDetailRoute = () => {
+  const { id } = useParams();
+  if (!id) return null;
+  return <DocumentPreview id={id} />;
+};
+
+const UploadPage = ({ category }: { category: { id: string; label: string; icon: ReactNode; path: string } }) => {
+  const [uploadedMaterialId, setUploadedMaterialId] = useState<string | null>(null);
+  
+  return (
+    <div className="fade-in">
+      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <Link to={category.path} className="btn-primary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <ChevronLeft size={16} /> 返回 {category.label}
+        </Link>
+      </div>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '2rem', display: 'flex', alignItems: 'center', gap: '12px', margin: 0 }}>
+          {category.icon} {category.label} - 上传与预览
+        </h1>
+        <p style={{ color: 'var(--text-sec)', marginTop: '8px' }}>在当前专区上传文件，成功后将在本页当场进行跨格式快速渲染预览。</p>
+      </div>
+      <FileUpload compact={false} onUploadedId={(id) => setUploadedMaterialId(id)} targetModuleOverride={category.id} />
+      {uploadedMaterialId && (
+        <div style={{ marginTop: '60px', borderTop: '2px dashed var(--border)', paddingTop: '40px' }}>
+          <h2 style={{ marginBottom: '24px', fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Eye size={24} color="var(--primary-solid)" /> 上传文件快速预览
+          </h2>
+          <DocumentPreview id={uploadedMaterialId} isPreview={true} />
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// --- Chat Widget ---
+const ChatWidget = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<{role: 'user'|'ai', text: string}[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
+    const msg = input.trim();
+    setInput('');
+    setMessages(prev => [...prev, { role: 'user', text: msg }]);
+    setLoading(true);
+
+    try {
+      const res = await axios.post('/api/chat', { message: msg });
+      const answer = res.data.answer;
+      setMessages(prev => [...prev, { role: 'ai', text: answer }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'ai', text: '抱歉，知识库助理暂时无法响应。' }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '16px' }}>
+      {isOpen && (
+        <div style={{ width: '360px', height: '500px', background: 'var(--bg-main)', border: '1px solid var(--border)', borderRadius: '16px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.2)', overflow: 'hidden' }}>
+          <div style={{ padding: '16px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <strong style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Bot size={18} color="var(--primary-solid)" /> 知识库助理 (RAG)</strong>
+            <button onClick={() => setIsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-sec)', cursor: 'pointer' }}><X size={16} /></button>
+          </div>
+          <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.9rem' }}>
+            {messages.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-sec)', marginTop: '40px' }}>有什么关于您的资料库想问的吗？</div>}
+            {messages.map((m, i) => (
+              <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', background: m.role === 'user' ? 'var(--primary-solid)' : 'rgba(255,255,255,0.05)', color: m.role === 'user' ? '#fff' : 'var(--text-main)', padding: '10px 14px', borderRadius: '12px', maxWidth: '85%', wordBreak: 'break-word', border: m.role === 'ai' ? '1px solid var(--border)' : 'none' }}>
+                <ReactMarkdown>{m.text}</ReactMarkdown>
+              </div>
+            ))}
+            {loading && <div style={{ alignSelf: 'flex-start', background: 'rgba(255,255,255,0.05)', color: 'var(--text-sec)', padding: '10px 14px', borderRadius: '12px', border: '1px solid var(--border)' }}>正在检索并思考...</div>}
+          </div>
+          <div style={{ padding: '12px', borderTop: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input 
+                value={input} 
+                onChange={e => setInput(e.target.value)} 
+                onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                placeholder="询问关于库内资料的问题..." 
+                style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-main)' }} 
+              />
+              <button onClick={sendMessage} disabled={loading} style={{ background: 'var(--primary-solid)', color: '#fff', border: 'none', borderRadius: '8px', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: loading ? 'not-allowed' : 'pointer' }}>
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <button 
+        onClick={() => setIsOpen(!isOpen)} 
+        style={{ width: '56px', height: '56px', borderRadius: '28px', background: 'var(--primary-solid)', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,242,254,0.3)', transition: 'transform 0.2s', transform: isOpen ? 'scale(0.9)' : 'scale(1)' }}
+      >
+        {isOpen ? <X size={24} /> : <MessageSquare size={24} />}
+      </button>
+    </div>
+  );
+};
 
 // --- App Entry ---
 
 function App() {
-  const [uploadOpen, setUploadOpen] = useState(false);
   const [submenuConfig, setSubmenuConfig] = useState<Record<string, SubMenuItem[]>>({});
   const [currentRole, setCurrentRole] = useState<'visitor' | 'editor' | 'admin'>('visitor');
 
@@ -1264,9 +1559,10 @@ function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/admin" element={<AdminConfigPage submenuConfig={submenuConfig} onSaved={fetchSubmenuConfig} onRoleChange={setCurrentRole} />} />
               <Route path="/news" element={<NewsPage />} />
-              <Route path="/materials/:id" element={<MaterialDetail />} />
+              <Route path="/business/upload" element={<UploadPage category={CATEGORIES.find(c => c.id === 'business')!} />} />
+              <Route path="/materials/:id" element={<MaterialDetailRoute />} />
               {CATEGORIES.filter((cat) => cat.id !== 'news').map(cat => (
-                <Route key={cat.id} path={cat.path} element={<CategoryPage category={cat} />} />
+                <Route key={cat.id} path={cat.path} element={<CategoryPage category={cat} submenuConfig={submenuConfig} />} />
               ))}
               <Route path="/:type/:id" element={<div className="fade-in">
                 <h1 style={{fontSize: '2.5rem'}}>详情页面加载中...</h1>
@@ -1275,28 +1571,6 @@ function App() {
               </div>} />
             </Routes>
           </div>
-
-          <button className="upload-fab" onClick={() => setUploadOpen(true)} aria-label="上传资料">
-            <Upload size={18} />
-          </button>
-
-          {uploadOpen && (
-            <div className="upload-modal-backdrop" onClick={() => setUploadOpen(false)}>
-              <div className="upload-modal-panel" onClick={(e) => e.stopPropagation()}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ margin: 0, fontSize: '1.2rem' }}>上传资料</h2>
-                  <button
-                    onClick={() => setUploadOpen(false)}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-sec)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-                <FileUpload compact onUploaded={() => setUploadOpen(false)} />
-              </div>
-            </div>
-          )}
-
           <footer style={{ marginTop: '80px', padding: '40px 0', borderTop: '1px solid var(--border)', color: 'var(--text-sec)', fontSize: '0.9rem', display: 'flex', justifyContent: 'space-between' }}>
             <span>© 2026 AI 数据实践宝库. All Rights Reserved.</span>
             <div style={{ display: 'flex', gap: '24px' }}>
@@ -1305,6 +1579,7 @@ function App() {
               <a href="#" style={{ color: 'inherit', textDecoration: 'none' }}>社区支持</a>
             </div>
           </footer>
+          <ChatWidget />
         </main>
       </div>
     </Router>

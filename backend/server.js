@@ -9,6 +9,9 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const db = require('./db');
+const multer = require('multer');
+const fs = require('fs');
+const { processAndStoreEmbeddings, queryRAG } = require('./rag');
 
 const app = express();
 const PORT = 3001;
@@ -36,6 +39,23 @@ const sanitizeSubmenuItems = (items) => {
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir);
+}
+app.use('/uploads', express.static(uploadsDir));
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + '-' + file.originalname);
+    }
+});
+const upload = multer({ storage: storage });
 
 // --- Settings API (Public & Admin) ---
 app.get('/api/settings', (req, res) => {
@@ -209,6 +229,12 @@ app.post('/api/admin/contents', requireAdminAuth, (req, res) => {
     try {
         const result = db.prepare('INSERT INTO contents (menu_id, title, type, body, meta, sort_order) VALUES (?, ?, ?, ?, ?, ?)')
             .run(menu_id || 0, title || '未命名', type || 'richtext', body || '', JSON.stringify(meta || {}), sort_order || 0);
+        
+        // Trigger embedding generation in background if body exists
+        if (body) {
+            processAndStoreEmbeddings(`content_${result.lastInsertRowid}`, body).catch(e => console.error("Embedding Error:", e));
+        }
+            
         res.json({ id: result.lastInsertRowid });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -223,6 +249,11 @@ app.put('/api/admin/contents/:id', requireAdminAuth, (req, res) => {
     try {
         db.prepare('UPDATE contents SET menu_id = ?, title = ?, type = ?, body = ?, meta = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
             .run(menu_id || 0, title, type, body, JSON.stringify(meta || {}), sort_order || 0, req.params.id);
+            
+        if (body) {
+            processAndStoreEmbeddings(`content_${req.params.id}`, body).catch(e => console.error("Embedding Error:", e));
+        }
+
         res.json({ ok: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -242,28 +273,47 @@ app.delete('/api/admin/contents/:id', requireAdminAuth, (req, res) => {
 });
 
 // --- MATERIAL STORAGE & UPLOAD ---
-app.post('/api/upload', (req, res) => {
-    const { name, module, isFolder, files, content } = req.body;
-    
+app.post('/api/upload', upload.single('file'), (req, res) => {
+    // If it's a real file upload via multer
+    let fileUrl = '';
+    if (req.file) {
+        fileUrl = `/uploads/${req.file.filename}`;
+    }
+
+    // fallback mapping if it's sent as JSON (for backward compatibility)
+    const bodyContent = req.body.content || fileUrl;
+    const isFolderFlag = req.body.isFolder === 'true' || req.body.isFolder === true;
+    const fileCountVal = parseInt(req.body.fileCount, 10) || 1;
+    const nameVal = req.body.name || (req.file ? req.file.originalname : '未命名资料');
+
     const newMaterial = {
         id: Date.now().toString(),
-        name: name || (files && files[0]?.name),
-        module: module || 'frameworks',
+        name: nameVal,
+        module: req.body.module || 'frameworks',
         timestamp: new Date().toISOString(),
-        isFolder: isFolder ? 1 : 0,
-        fileCount: files ? files.length : 1,
-        content: content || ''
+        isFolder: isFolderFlag ? 1 : 0,
+        fileCount: fileCountVal,
+        content: bodyContent
     };
     
-    db.prepare('INSERT INTO materials (id, name, module, timestamp, isFolder, fileCount, content) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-        newMaterial.id, newMaterial.name, newMaterial.module, newMaterial.timestamp, newMaterial.isFolder, newMaterial.fileCount, newMaterial.content
-    );
-    
-    // Map back for frontend
-    res.status(201).json({
-        ...newMaterial,
-        isFolder: !!newMaterial.isFolder
-    });
+    try {
+        db.prepare('INSERT INTO materials (id, name, module, timestamp, isFolder, fileCount, content) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+            newMaterial.id, newMaterial.name, newMaterial.module, newMaterial.timestamp, newMaterial.isFolder, newMaterial.fileCount, newMaterial.content
+        );
+
+        // Process pure textual representations implicitly provided during upload if any.
+        // E.g. Markdown or txt file contents that we might have received.
+        if (!fileUrl && bodyContent && typeof bodyContent === 'string' && bodyContent.length > 50 && !bodyContent.startsWith('data:')) {
+            processAndStoreEmbeddings(`material_${newMaterial.id}`, bodyContent).catch(e => console.error("Embedding Error:", e));
+        }
+
+        res.status(201).json({
+            ...newMaterial,
+            isFolder: !!newMaterial.isFolder
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.get('/api/materials/:module', (req, res) => {
@@ -324,6 +374,18 @@ app.post('/api/materials/analyze/:id', async (req, res) => {
         res.json({ analysis });
     } catch (error) {
         res.status(500).json({ error: 'AI 分析不可用' });
+    }
+});
+
+app.post('/api/chat', async (req, res) => {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: '消息为空' });
+
+    try {
+        const answer = await queryRAG(message);
+        res.json({ answer });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
