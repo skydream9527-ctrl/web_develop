@@ -13,7 +13,7 @@ export async function analyzeContent(content: string) {
     }
 
     try {
-        const response = await axios.post(`${API_URL}?key=${API_KEY}`, {
+        const response = await axios.post(API_URL, {
             contents: [{
                 parts: [{
                     text: `请分析以下内容，提炼核心要点，生成简洁的摘要报告：\n\n${content}`
@@ -21,7 +21,8 @@ export async function analyzeContent(content: string) {
             }]
         }, {
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'x-goog-api-key': API_KEY
             }
         });
 

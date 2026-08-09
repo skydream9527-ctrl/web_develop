@@ -31,12 +31,12 @@ async function getEmbedding(text) {
       return null;
   }
   try {
-      const response = await axios.post(`${EMBEDDING_URL}?key=${API_KEY}`, {
+      const response = await axios.post(EMBEDDING_URL, {
           model: "models/text-embedding-004",
           content: {
               parts: [{ text }]
           }
-      }, { headers: { 'Content-Type': 'application/json' } });
+      }, { headers: { 'Content-Type': 'application/json', 'x-goog-api-key': API_KEY } });
       
       const values = response.data?.embedding?.values;
       if (!values) throw new Error("Invalid embedding response");
@@ -116,9 +116,9 @@ async function queryRAG(userQuery) {
 
     if (!API_KEY) return "AI 对话暂不可用";
     try {
-        const response = await axios.post(`${GENERATE_URL}?key=${API_KEY}`, {
+        const response = await axios.post(GENERATE_URL, {
             contents: [{ parts: [{ text: prompt }] }]
-        }, { headers: { 'Content-Type': 'application/json' } });
+        }, { headers: { 'Content-Type': 'application/json', 'x-goog-api-key': API_KEY } });
         
         return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || "生成的回答为空。";
     } catch(err) {

@@ -14,8 +14,12 @@ const fs = require('fs');
 const { processAndStoreEmbeddings, queryRAG } = require('./rag');
 
 const app = express();
-const PORT = 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-me';
+const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('JWT_SECRET 环境变量未设置，拒绝启动');
+  process.exit(1);
+}
 
 const loginLimiter = rateLimit({
     windowMs: 10 * 60 * 1000,
@@ -55,7 +59,21 @@ const storage = multer.diskStorage({
         cb(null, uniqueSuffix + '-' + file.originalname);
     }
 });
-const upload = multer({ storage: storage });
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB
+    },
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = /pdf|doc|docx|txt|md|json|csv|xlsx|ppt|pptx|jpg|jpeg|png|gif|webp/;
+        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+        const mimetype = allowedTypes.test(file.mimetype);
+        if (extname || mimetype) {
+            return cb(null, true);
+        }
+        cb(new Error('不支持的文件类型'));
+    }
+});
 
 // --- Settings API (Public & Admin) ---
 app.get('/api/settings', (req, res) => {
@@ -237,7 +255,8 @@ app.post('/api/admin/contents', requireAdminAuth, (req, res) => {
             
         res.json({ id: result.lastInsertRowid });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error(err);
+        res.status(500).json({ error: '服务器内部错误' });
     }
 });
 
@@ -256,7 +275,8 @@ app.put('/api/admin/contents/:id', requireAdminAuth, (req, res) => {
 
         res.json({ ok: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error(err);
+        res.status(500).json({ error: '服务器内部错误' });
     }
 });
 
@@ -268,12 +288,13 @@ app.delete('/api/admin/contents/:id', requireAdminAuth, (req, res) => {
         db.prepare('DELETE FROM contents WHERE id = ?').run(req.params.id);
         res.json({ ok: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error(err);
+        res.status(500).json({ error: '服务器内部错误' });
     }
 });
 
 // --- MATERIAL STORAGE & UPLOAD ---
-app.post('/api/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', requireAdminAuth, upload.single('file'), (req, res) => {
     // If it's a real file upload via multer
     let fileUrl = '';
     if (req.file) {
@@ -312,7 +333,8 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
             isFolder: !!newMaterial.isFolder
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error(err);
+        res.status(500).json({ error: '服务器内部错误' });
     }
 });
 
@@ -340,7 +362,7 @@ app.get('/api/materials/detail/:id', (req, res) => {
     });
 });
 
-app.post('/api/materials/analyze/:id', async (req, res) => {
+app.post('/api/materials/analyze/:id', requireAdminAuth, async (req, res) => {
     const id = req.params.id;
     const material = db.prepare('SELECT content FROM materials WHERE id = ?').get(id);
     
@@ -377,7 +399,19 @@ app.post('/api/materials/analyze/:id', async (req, res) => {
     }
 });
 
-app.post('/api/chat', async (req, res) => {
+const chatRateLimit = {};
+function rateLimitChat(req, res, next) {
+  const ip = req.ip;
+  const now = Date.now();
+  if (!chatRateLimit[ip] || now - chatRateLimit[ip] > 60000) {
+    chatRateLimit[ip] = now;
+  } else {
+    return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+  }
+  next();
+}
+
+app.post('/api/chat', rateLimitChat, async (req, res) => {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: '消息为空' });
 
@@ -385,7 +419,8 @@ app.post('/api/chat', async (req, res) => {
         const answer = await queryRAG(message);
         res.json({ answer });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error(err);
+        res.status(500).json({ error: '服务器内部错误' });
     }
 });
 
@@ -394,7 +429,7 @@ app.get('/api/skills', (req, res) => {
     res.json(skills);
 });
 
-app.post('/api/skills', (req, res) => {
+app.post('/api/skills', requireAdminAuth, (req, res) => {
     const { name, description, category } = req.body;
     const id = Date.now().toString();
     db.prepare('INSERT INTO skills (id, name, description, category) VALUES (?, ?, ?, ?)').run(id, name, description, category);
