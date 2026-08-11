@@ -19,6 +19,10 @@ import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Tree, type NodeModel } from '@minoru/react-dnd-treeview';
 
+const ROUTER_BASENAME = window.location.pathname.startsWith('/web-develop')
+  ? '/web-develop'
+  : undefined;
+
 type NewsItem = {
   id: string;
   title: string;
@@ -1549,7 +1553,7 @@ function App() {
   };
 
   return (
-    <Router>
+    <Router basename={ROUTER_BASENAME}>
       <div className="app-container">
         <Sidebar submenuConfig={submenuConfig} />
         <main className="main-content">
